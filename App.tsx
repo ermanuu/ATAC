@@ -12,7 +12,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
 
-const ATAC_LOGO = require('./assets/atac-logo.png');
+const ATAC_LOGO = require('./assets/bus-front.png');
 const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 export type Stop = { stop_id: string; name: string };
 export type Route = { route_id: string; name: string; description: string };
@@ -131,7 +131,7 @@ function AppShell() {
       </GlassSurface>
     </View>}
     {!logoReady && <View accessibilityLabel="Avvio app" style={s.launchScreen}>
-      <Image source={ATAC_LOGO} resizeMode="contain" accessibilityLabel="Logo ATAC" style={s.launchLogo} onLoadEnd={() => requestAnimationFrame(() => requestAnimationFrame(() => setLogoReady(true)))} />
+      <Image source={ATAC_LOGO} resizeMode="contain" accessibilityLabel="Logo Roma Autobus" style={s.launchLogo} onLoadEnd={() => requestAnimationFrame(() => requestAnimationFrame(() => setLogoReady(true)))} />
       <Text style={s.launchName}>ROMA · AUTOBUS</Text>
       <ActivityIndicator color="#96002d" accessibilityLabel="Caricamento" />
     </View>}
@@ -142,7 +142,7 @@ export function Home() {
   const live = state.data?.vehicles.available && state.data?.updates.available;
   return <View style={s.home}>
     <View style={s.homeHeader}>
-      <Image source={ATAC_LOGO} resizeMode="cover" accessibilityLabel="Logo ATAC" style={s.homeLogo} />
+      <Image source={ATAC_LOGO} resizeMode="contain" accessibilityLabel="Logo Roma Autobus" style={s.homeLogo} />
       <Text style={s.eyebrow}>ROMA · AUTOBUS</Text>
       <Text style={[s.livePill, { color: live ? '#167450' : '#815b25' }]}>{live ? '● Feed live' : state.loading ? 'Verifica live…' : '● Live non disponibile'}</Text>
       <Text style={s.homeTitle}>La città, in movimento.</Text>

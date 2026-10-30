@@ -11,10 +11,9 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/bus-front.png",
+        "monochromeImage": "./assets/bus-front.png"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -29,7 +28,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/atac-logo.png",
+          "image": "./assets/bus-front.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
