@@ -30,7 +30,7 @@ class Unavailable(Exception):
 
 
 def download(url, timeout=60):
-    request = urllib.request.Request(url, headers={"User-Agent": "ATAC-development/0.1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "ATAC-development/0.1", "Cache-Control": "no-cache"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
@@ -152,8 +152,11 @@ class Realtime:
         with self.lock:
             cached = self.cache.get(kind)
             now = time.time()
-            if cached and now - cached[0] < 30:
-                return cached[1]
+            ttl = 10 if kind == "vehicles" else 30
+            if cached and now - cached[0] < ttl:
+                value = cached[1]
+                if not value["available"] or -60 <= now - value["timestamp"] <= 180:
+                    return value
             try:
                 feed = gtfs_realtime_pb2.FeedMessage()
                 feed.ParseFromString(download(VEHICLES_URL if kind == "vehicles" else UPDATES_URL, timeout=10))
@@ -202,13 +205,18 @@ def route_detail(route_id, variant=None, now=None):
 
 
 def arrivals(stop_id):
+    from .lines import variant_id
     now = int(time.time())
     scheduled = []
+    variants = {}
     with connect() as db:
         for epoch, active in service_windows(db, now, 7200):
-            for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
+            for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
-                    scheduled.append({"tripId": r["trip_id"], "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
+                    if r["trip_id"] not in variants:
+                        stop_ids = [s[0] for s in db.execute("SELECT stop_id FROM times WHERE trip_id=? ORDER BY sequence", (r["trip_id"],))]
+                        variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
+                    scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
     live = realtime.read("updates")
     if live["available"]:
         by_trip = {}
@@ -247,9 +255,33 @@ def arrivals(stop_id):
                     break
                 if skipped:
                     continue
+                if item["kind"] == "live" and update.HasField("vehicle"):
+                    item["vehicleId"] = update.vehicle.label or update.vehicle.id or None
             keep.append(item)
         scheduled = keep
-    return {"arrivals": sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"]),
+    scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
+    if any(i["kind"] == "live" and not i["vehicleId"] for i in scheduled):
+        positions = realtime.read("vehicles")
+        assignments = {}
+        assignment_now = int(time.time())
+        if positions["available"]:
+            for entity in positions["feed"].entity:
+                if entity.is_deleted or not entity.HasField("vehicle"):
+                    continue
+                vehicle = entity.vehicle
+                stamp = int(vehicle.timestamp or positions["timestamp"])
+                number = vehicle.vehicle.label or vehicle.vehicle.id
+                if number and 0 <= assignment_now - stamp <= 90:
+                    key = (vehicle.trip.trip_id, vehicle.trip.start_date)
+                    assignments.setdefault(key, []).append((vehicle.trip.route_id, number))
+        for item in scheduled:
+            if item["kind"] != "live" or item["vehicleId"]:
+                continue
+            candidates = assignments.get((item["tripId"], item["serviceDate"]), assignments.get((item["tripId"], ""), []))
+            numbers = {number for route, number in candidates if not route or route == item["routeId"]}
+            if len(numbers) == 1:
+                item["vehicleId"] = numbers.pop()
+    return {"arrivals": scheduled,
             "liveAvailable": live["available"], "timestamp": live["timestamp"]}
 
 

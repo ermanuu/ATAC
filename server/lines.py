@@ -10,6 +10,11 @@ from google.transit import gtfs_realtime_pb2 as pb
 from . import transit as t
 
 
+def variant_id(direction, headsign, stop_ids):
+    key = (direction, headsign, tuple(stop_ids))
+    return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
 def patterns(db, route_id, now):
     windows = list(t.service_windows(db, now, 3600))
     services = set().union(*(active for _, active in windows))
@@ -28,7 +33,7 @@ def patterns(db, route_id, now):
             continue
         key = (trip['direction'], trip['headsign'], tuple(s['stop_id'] for s in stops))
         if key not in groups:
-            identifier = hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()[:16]
+            identifier = variant_id(*key)
             groups[key] = {'id': identifier, 'direction': trip['direction'], 'headsign': trip['headsign'] or stops[-1]['name'],
                            'fromName': stops[0]['name'], 'toName': stops[-1]['name'], 'stopCount': len(stops),
                            'stops': stops, 'trips': {}}
@@ -93,6 +98,38 @@ def stop_distance(lat, lon, stop):
                       (lon - stop['lon']) * 111320 * math.cos(math.radians(lat)))
 
 
+def gps_segment(lat, lon, stops, preferred=None):
+    """Project GPS onto stop-to-stop segments; loops/crossings stay ambiguous."""
+    scale = math.cos(math.radians(lat))
+    candidates = []
+    for end in range(1, len(stops)):
+        a, b = stops[end-1], stops[end]
+        ax, ay = (a['lon']-lon)*111320*scale, (a['lat']-lat)*111320
+        bx, by = (b['lon']-lon)*111320*scale, (b['lat']-lat)*111320
+        dx, dy = bx-ax, by-ay
+        length = dx*dx+dy*dy
+        if length < 1:
+            continue
+        fraction = max(0.0, min(1.0, -(ax*dx+ay*dy)/length))
+        distance = math.hypot(ax+fraction*dx, ay+fraction*dy)
+        candidates.append((distance, end, fraction))
+    candidates.sort()
+    if not candidates or candidates[0][0] > 150:
+        return None
+    best = candidates[0]
+    # Preserve a credible declared segment at crossings or on a return leg.
+    if preferred is not None:
+        declared = next((c for c in candidates if c[1] == preferred), None)
+        if declared and declared[0] <= best[0] + 40:
+            return declared
+    if len(candidates) > 1 and candidates[1][0] <= best[0] + 20:
+        # Adjacent segments meeting at the same stop are not a loop ambiguity.
+        other = candidates[1]
+        if abs(other[1]-best[1]) != 1:
+            return None
+    return best
+
+
 def place_vehicles(group, groups, sequences, now, live):
     stops = [{k: v for k, v in s.items() if k not in ('trip_id', 'departure', 'pickup')} |
              {'vehiclesAt': [], 'vehiclesBefore': []} for s in group['stops']]
@@ -105,7 +142,7 @@ def place_vehicles(group, groups, sequences, now, live):
             continue
         vehicle = entity.vehicle
         timestamp = int(vehicle.timestamp or live['timestamp'])
-        if not 0 <= now - timestamp <= 180:
+        if not 0 <= now - timestamp <= 90:
             continue
         if vehicle.trip.HasField('direction_id') and group['direction'] and str(vehicle.trip.direction_id) != group['direction']:
             continue
@@ -137,6 +174,28 @@ def place_vehicles(group, groups, sequences, now, live):
             matches = [i for i, stop_id in enumerate(selected_ids) if stop_id == vehicle.stop_id]
             if len(matches) == 1:
                 index = matches[0]
+        placement_override = None
+        if vehicle.HasField('position'):
+            lat, lon = vehicle.position.latitude, vehicle.position.longitude
+            if math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180:
+                projected = gps_segment(lat, lon, stops, index)
+                stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
+                # A stale stop_sequence must not pin a bus to a stop it has passed.
+                inconsistent = index is None or (stopped and stop_distance(lat, lon, stops[index]) > 100)
+                if projected is not None and index is not None and not stopped and projected[1] != index:
+                    inconsistent = True
+                if projected is not None and inconsistent:
+                    _, end, fraction = projected
+                    if fraction >= 0.95 and stop_distance(lat, lon, stops[end]) <= 50:
+                        index, placement_override = end, 'at'
+                    elif fraction <= 0.05 and stop_distance(lat, lon, stops[end-1]) <= 50:
+                        index, placement_override = end-1, 'at'
+                    else:
+                        index, placement_override = end, 'before'
+                    estimated = True
+                elif inconsistent and stopped and index is not None and stop_distance(lat, lon, stops[index]) > 500:
+                    # GPS far off the route contradicts the stop reference: do not pin it there.
+                    index = None
         if index is None and vehicle.HasField('position'):
             lat, lon = vehicle.position.latitude, vehicle.position.longitude
             distances = [stop_distance(lat, lon, s) for s in stops]
@@ -148,10 +207,11 @@ def place_vehicles(group, groups, sequences, now, live):
             unplaced += 1
             continue
         stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
-        placement = 'at' if stopped or estimated else 'before'
+        placement = placement_override or ('at' if stopped or estimated else 'before')
         item = {'id': vehicle.vehicle.id or entity.id, 'timestamp': timestamp,
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
                 'estimated': estimated, 'placement': placement,
+                'timestampSource': 'vehicle' if vehicle.timestamp else 'feed',
                 'lat': vehicle.position.latitude if vehicle.HasField('position') else None,
                 'lon': vehicle.position.longitude if vehicle.HasField('position') else None}
         stops[index]['vehiclesAt' if placement == 'at' else 'vehiclesBefore'].append(item)
@@ -159,6 +219,7 @@ def place_vehicles(group, groups, sequences, now, live):
 
 
 def line_detail(route_id, variant=None, now=None):
+    use_current_clock = now is None
     now = int(time.time()) if now is None else now
     with t.connect() as db:
         route = db.execute('SELECT * FROM routes WHERE route_id=? AND type=3', (route_id,)).fetchone()
@@ -174,6 +235,9 @@ def line_detail(route_id, variant=None, now=None):
         raise ValueError('Direzione non disponibile: torna alla scelta della direzione')
     vehicles = t.realtime.read('vehicles')
     updates = t.realtime.read('updates')
+    if use_current_clock:
+        # Fetching may take seconds: evaluate freshness after the feed arrives.
+        now = int(time.time())
     positioned_stops, unplaced = place_vehicles(selected, groups, sequences, now, vehicles)
     result.update(selectedVariant=summary(selected), stops=positioned_stops,
                   departures=terminal_departures(selected, sequences, windows, now, updates),

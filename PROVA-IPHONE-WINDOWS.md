@@ -66,8 +66,10 @@ Mantieni entrambe le finestre aperte durante la prova. `localhost` e `127.0.0.1`
 
 ## 6. Cosa provare
 
+All’apertura scegli uno dei tre pulsanti della home. Nelle ricerche compaiono soltanto le schede Linee/Fermate/Percorso in alto. Nei dettagli il ritorno in alto a destra rimane visibile durante lo scorrimento.
+
 - **Linee**: cerca una linea, scegli la direzione e consulta le partenze dal capolinea (−10 / +60 minuti). Nell’elenco fermate, le miniature a sinistra indicano i bus fermi o in arrivo; toccale per i dettagli, oppure tocca una fermata per gli arrivi.
-- **Fermate**: cerca una fermata oppure tocca “Tutti gli autobus in arrivo” sotto una fermata del percorso. Mostra tutti gli arrivi disponibili di tutte le linee nelle prossime due ore, con attesa e orario. Usa “Aggiorna arrivi” per ricaricare e “Torna alla linea” per riprendere la direzione selezionata.
+- **Fermate**: cerca una fermata oppure tocca la freccia accanto al nome di una fermata del percorso. Mostra tutti gli arrivi disponibili di tutte le linee nelle prossime due ore, con attesa e orario. Usa “Aggiorna arrivi” per ricaricare e il tasto fisso “Torna alla linea” per riprendere la direzione selezionata. Quando disponibile, il numero vettura compare dopo “Previsione live”. Toccando una linea in arrivo si apre direttamente il suo itinerario e l’elenco dei bus in transito.
 - **Percorso**: seleziona due fermate e calcola un itinerario solo autobus. Il calcolo usa gli orari programmati, non il traffico live.
 
 Se i feed live non sono raggiungibili, l’app lo indica; senza GTFS importato le ricerche non sono disponibili. Aggiorna gli orari con `npm run data:import` prima della prova o almeno ogni giorno.
@@ -95,3 +97,5 @@ Mantieni `EXPO_PUBLIC_API_URL` impostato nel terminale prima di riavviare. Lasci
 Arresta backend ed Expo con Ctrl+C nelle rispettive finestre. Scarica dal browser autenticato lo ZIP aggiornato di GitHub ed estrailo in una cartella separata. Copia `App.tsx`, la cartella `src` e i file della cartella `server` dentro `C:\ATAC`, unendo le cartelle e sostituendo i file. Conserva `server\data`, `.venv` e le impostazioni locali. Non è necessaria una nuova importazione degli orari per questo aggiornamento.
 
 Riavvia il backend nella prima finestra con `set API_HOST=0.0.0.0` e `npm run api`. Nella seconda mantieni `EXPO_PUBLIC_API_URL` con l’indirizzo del PC e avvia `npm start -- --clear --lan`, poi scansiona il nuovo QR. Occorre aggiornare sia il backend sia l’app: il nuovo elenco di direzioni usa l’API aggiornata.
+
+Le posizioni dei bus vengono rilette ogni 15 secondi e le icone delle misure più vecchie di 90 secondi vengono rimosse. Nel dettaglio del bus è visibile il timestamp con i secondi. Se il GPS contraddice la vecchia fermata, l’app può aggiornare la collocazione in modo approssimato (≈); se la fonte ripete le stesse coordinate, non viene simulato uno spostamento. Per queste modifiche aggiornare anche `server`, oltre a `App.tsx` e all’intera cartella `src`.

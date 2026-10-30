@@ -1,1 +1,1 @@
-export { Lines as default } from '../../App';
+export { Home as default } from '../../App';

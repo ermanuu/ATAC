@@ -143,6 +143,27 @@ class TransitTests(unittest.TestCase):
             client.read("updates")
             self.assertEqual(fetch.call_count, 1)
 
+    def test_vehicle_cache_refreshes_before_next_fifteen_second_poll(self):
+        f=pb.FeedMessage(); f.header.gtfs_realtime_version='2.0'; f.header.timestamp=self.now
+        client=t.Realtime()
+        with patch.object(t.time,'time',return_value=self.now) as now, patch.object(t,'download',return_value=f.SerializeToString()) as fetch:
+            self.assertTrue(client.read('vehicles')['available'])
+            now.return_value=self.now+5
+            client.read('vehicles')
+            self.assertEqual(fetch.call_count,1)
+            now.return_value=self.now+15
+            f.header.timestamp=self.now+15; fetch.return_value=f.SerializeToString()
+            self.assertEqual(client.read('vehicles')['timestamp'],self.now+15)
+            self.assertEqual(fetch.call_count,2)
+
+    def test_cached_feed_cannot_remain_available_after_expiry(self):
+        f=pb.FeedMessage(); f.header.gtfs_realtime_version='2.0'; f.header.timestamp=self.now-175
+        client=t.Realtime()
+        with patch.object(t.time,'time',return_value=self.now) as now, patch.object(t,'download',return_value=f.SerializeToString()):
+            self.assertTrue(client.read('vehicles')['available'])
+            now.return_value=self.now+7
+            self.assertFalse(client.read('vehicles')['available'])
+
     def test_trip_update_and_cancellation(self):
         feed = pb.FeedMessage()
         feed.header.gtfs_realtime_version = "2.0"

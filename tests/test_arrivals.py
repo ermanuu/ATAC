@@ -83,6 +83,38 @@ class StopArrivalsTests(unittest.TestCase):
         result=[a for a in t.arrivals('b')['arrivals'] if a['tripId']=='loop']
         self.assertEqual([(a['time']-self.now,a['kind']) for a in result],[(300,'scheduled'),(1500,'live')])
 
+    def test_arrival_links_to_matching_route_and_direction(self):
+        items=t.arrivals('b')['arrivals']
+        for item in items:
+            board=t.route_detail(item['routeId'],item['variantId'],self.now)
+            self.assertEqual(board['selectedVariant']['headsign'],item['headsign'])
+            self.assertTrue(any(s['stop_id']=='b' for s in board['stops']))
+
+    def test_live_vehicle_number_comes_from_trip_update(self):
+        f=self.feed(); e=f.entity.add(); e.id='vehicle-update'
+        u=e.trip_update; u.trip.trip_id='t1'; u.vehicle.id='internal-id'; u.vehicle.label='1234'
+        stop=u.stop_time_update.add(); stop.stop_sequence=20; stop.arrival.delay=60
+        item=next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')
+        self.assertEqual(item['vehicleId'],'1234')
+        self.assertEqual(item['kind'],'live')
+
+    def test_vehicle_number_falls_back_to_fresh_positions(self):
+        updates=self.feed(); e=updates.entity.add(); e.id='prediction'; e.trip_update.trip.trip_id='t1'
+        stop=e.trip_update.stop_time_update.add(); stop.stop_sequence=20; stop.arrival.delay=60
+        positions=pb.FeedMessage(); positions.header.gtfs_realtime_version='2.0'; positions.header.timestamp=self.now
+        e=positions.entity.add(); e.id='position'; v=e.vehicle; v.trip.trip_id='t1'; v.trip.route_id='r1'; v.vehicle.id='5678'; v.timestamp=self.now
+        with patch.object(t.realtime,'read',side_effect=lambda kind:{'available':True,'timestamp':self.now,'feed':updates if kind=='updates' else positions}):
+            item=next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')
+            self.assertEqual(item['vehicleId'],'5678')
+            v.timestamp=self.now+10
+            with patch.object(t.time,'time',side_effect=[self.now,self.now+15]):
+                self.assertEqual(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'],'5678')
+            v.timestamp=self.now-91
+            self.assertIsNone(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'])
+
+    def test_missing_vehicle_number_is_not_invented(self):
+        self.assertTrue(all(a['vehicleId'] is None for a in t.arrivals('b')['arrivals']))
+
 
 if __name__=='__main__':
     unittest.main()

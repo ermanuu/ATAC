@@ -170,6 +170,47 @@ class LineTests(unittest.TestCase):
         result=self.board()
         self.assertEqual([v['id'] for v in result['stops'][1]['vehiclesAt']],['unambiguous'])
 
+    def test_gps_advances_bus_when_stop_sequence_is_stuck(self):
+        self.add_trip('progress',36000,headsign='Progress',stops=('a','b','c'))
+        feed=self.feed('vehicles')
+        v=self.vehicle(feed,'advancing',trip='progress',sequence=10,stop='a')
+        v.position.latitude=41.90; v.position.longitude=12.49
+        self.assertEqual(self.board('Progress')['stops'][0]['vehiclesAt'][0]['id'],'advancing')
+        self.now += 15; v.timestamp=self.now
+        v.position.latitude=41.905; v.position.longitude=12.495
+        first=self.board('Progress')
+        self.assertFalse(first['stops'][0]['vehiclesAt'])
+        self.assertEqual(first['stops'][1]['vehiclesBefore'][0]['id'],'advancing')
+        self.assertTrue(first['stops'][1]['vehiclesBefore'][0]['estimated'])
+        self.now += 15; v.timestamp=self.now
+        v.position.latitude=41.915; v.position.longitude=12.505
+        second=self.board('Progress')
+        self.assertFalse(second['stops'][1]['vehiclesBefore'])
+        self.assertEqual(second['stops'][2]['vehiclesBefore'][0]['id'],'advancing')
+
+    def test_moving_bus_advances_past_declared_next_stop(self):
+        self.add_trip('progress',36000,headsign='Progress',stops=('a','b','c'))
+        feed=self.feed('vehicles')
+        v=self.vehicle(feed,'passed',trip='progress',sequence=20,stop='b',status=pb.VehiclePosition.IN_TRANSIT_TO)
+        v.position.latitude=41.915; v.position.longitude=12.505
+        board=self.board('Progress')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['id'],'passed')
+
+    def test_vehicle_icon_expires_after_ninety_seconds(self):
+        feed=self.feed('vehicles')
+        self.vehicle(feed,'expired',sequence=10,timestamp=self.now-91)
+        self.vehicle(feed,'boundary',sequence=10,timestamp=self.now-90)
+        self.assertEqual([v['id'] for v in self.board()['stops'][0]['vehiclesAt']],['boundary'])
+
+    def test_feed_updated_during_download_is_not_discarded_as_future(self):
+        selected=self.variant()
+        feed=self.feed('vehicles')
+        self.vehicle(feed,'fresh-during-fetch',sequence=10,timestamp=self.now+10)
+        with patch('server.lines.time.time',side_effect=[self.now,self.now+20]):
+            board=t.route_detail('r1',selected)
+        self.assertEqual(board['stops'][0]['vehiclesAt'][0]['id'],'fresh-during-fetch')
+
     def test_api_forwards_selected_direction(self):
         handler=object.__new__(Handler)
         handler.path=f'/api/routes/r1?variant={self.variant()}'
