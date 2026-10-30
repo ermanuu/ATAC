@@ -1,9 +1,10 @@
+import { RefreshProvider, useRefresh } from './src/lib/Refresh';
 import { GlassBackground, GlassPressable, GlassProvider, GlassSurface, glassStyle } from './src/ui/Glass';
 import { NavIcon } from './src/ui/NavIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
@@ -15,9 +16,9 @@ export type Route = { route_id: string; name: string; description: string };
 type Health = { vehicles: { available: boolean }; updates: { available: boolean } };
 type Arrivals = { apiVersion?: number; arrivals: { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; line: string; headsign: string; time: number; scheduledTime?: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
 type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
-async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function api<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
   if (!API) throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
-  const response = await fetch(`${API}/api/${path}`, { signal });
+  const response = await fetch(`${API}/api/${path}${force ? `${path.includes('?') ? '&' : '?'}fresh=1` : ''}`, { signal });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Servizio non disponibile');
   return body;
@@ -33,33 +34,43 @@ export function Badge({ name }: { name: string }) { return <View style={s.badge}
 // Abort obsolete requests. Retained line boards check vehicle freshness separately.
 export function useData<T>(path: string | null, interval = 0, retainWhileLoading = false) {
   const [data, setData] = useState<T | null>(null);
+  const [receivedAt, setReceivedAt] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [revision, setRevision] = useState(0);
+  const { register } = useRefresh();
+  const loader = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  const retry = useCallback(() => loader.current(true), []);
   useEffect(() => {
     setData(null); setError(''); setLoading(false);
     if (!path) return;
     let controller: AbortController | undefined;
-    let inFlight = false;
-    const load = () => {
-      // A slow feed must finish instead of being aborted at every polling tick.
-      if (inFlight) return;
-      inFlight = true;
-      controller?.abort(); controller = new AbortController(); const signal = controller.signal;
+    let pending: Promise<void> | null = null;
+    let disposed = false;
+    const load = (force = false): Promise<void> => {
+      if (disposed) return Promise.resolve();
+      // Finish slow polls; an explicit refresh then fetches a new source snapshot.
+      if (pending) return force ? pending.then(() => load(true)) : pending;
+      controller = new AbortController(); const signal = controller.signal;
       if (!retainWhileLoading) setData(null);
-      setError(''); setLoading(true);
-      api<T>(path, signal).then(value => { if (!signal.aborted) setData(value); }).catch(e => { if (!signal.aborted) { if (!retainWhileLoading) setData(null); setError(e.message); } })
-        .finally(() => { inFlight = false; if (!signal.aborted) setLoading(false); });
+      if (!retainWhileLoading) setError(''); setLoading(true);
+      pending = api<T>(path, signal, force).then(value => { if (!signal.aborted) { setData(value); setError(''); setReceivedAt(Date.now() / 1000); } })
+        .catch(e => { if (!signal.aborted) { if (!retainWhileLoading) setData(null); setError(e.message); } })
+        .finally(() => { pending = null; if (!signal.aborted) setLoading(false); });
+      return pending;
     };
-    const delay = setTimeout(load, 250);
-    const timer = interval ? setInterval(load, interval) : undefined;
-    const listener = AppState.addEventListener('change', state => { if (state === 'active') load(); });
-    return () => { controller?.abort(); clearTimeout(delay); if (timer) clearInterval(timer); listener.remove(); };
-  }, [path, interval, revision, retainWhileLoading]);
-  return { data, error, loading, retry: () => setRevision(n => n + 1) };
+    loader.current = load;
+    const unregister = register(load);
+    // Returning from a stop must not reuse an older line snapshot from the cache.
+    const delay = setTimeout(() => { void load(Boolean(interval)); }, 250);
+    const timer = interval ? setInterval(() => { void load(); }, interval) : undefined;
+    const listener = AppState.addEventListener('change', state => { if (state === 'active') void load(true); });
+    return () => { disposed = true; unregister(); controller?.abort(); clearTimeout(delay); if (timer) clearInterval(timer); listener.remove(); };
+  }, [path, interval, retainWhileLoading, register]);
+  return { data, error, loading, retry, receivedAt };
 }
+
 export function RequestState({ state }: { state: { loading: boolean; error: string; retry: () => void } }) {
-  return <>{state.loading && <ActivityIndicator color="#a01d35" />}{!!state.error && <><Notice text={state.error} /><Button text="Riprova" onPress={state.retry} /></>}</>;
+  return <>{state.loading && <ActivityIndicator color="#a01d35" />}{!!state.error && <><Notice text={state.error} /><Button text="Riprova" onPress={state.retry} disabled={state.loading} /></>}</>;
 }
 function StopSearch({ label, selected, onSelect }: { label: string; selected: Stop | null; onSelect: (stop: Stop | null) => void }) {
   const [query, setQuery] = useState('');
@@ -71,7 +82,9 @@ function StopSearch({ label, selected, onSelect }: { label: string; selected: St
     {!selected && state.data?.map(stop => <GlassPressable accessibilityRole="button" key={stop.stop_id} style={s.stop} onPress={() => onSelect(stop)}><Text style={s.body}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassPressable>)}
   </View>;
 }
-export default function App() {
+export default function App() { return <RefreshProvider><AppShell /></RefreshProvider>; }
+function AppShell() {
+  const { refresh, refreshing } = useRefresh();
   const insets = useSafeAreaInsets();
   const [logoReady, setLogoReady] = useState(false);
   const pathname = usePathname();
@@ -96,7 +109,7 @@ export default function App() {
       </GlassPressable>
       {lineDetail && params.id && params.variant && <GlassPressable floating accessibilityRole="button" accessibilityLabel="Cambia direzione" style={s.headerAction} onPress={() => router.replace({ pathname: '/line/[id]', params: { id: params.id! } })}><Text style={s.headerActionText}>Direzione</Text></GlassPressable>}
     </View>}
-    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : s.scroll}>
+    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#96002d" colors={['#96002d']} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : s.scroll}>
       <Slot />
     </ScrollView></View>
     {!home && <View pointerEvents="box-none" style={[s.bottomDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
@@ -199,31 +212,29 @@ export function Stops() {
     }
   };
   const specificStop = Boolean(params.stopId);
-  const liveFresh = Boolean(state.data?.liveAvailable && state.data.timestamp && now - state.data.timestamp <= 180);
+  const liveFresh = Boolean(!state.error && state.data?.liveAvailable && state.data.timestamp && now - state.data.timestamp <= 180);
   const arrivals = (state.data?.arrivals || []).map(a => a.kind === 'live' && !liveFresh
     ? { ...a, time: a.scheduledTime || 0, kind: 'scheduled' } : a).filter(a => a.time >= now && a.time <= now + 7200);
   return <View style={s.stack}>
     <Text style={s.heading}>{specificStop ? 'Autobus in arrivo' : 'Cerca fermata'}</Text>
-    {specificStop && <Text style={s.muted}>Tutte le linee · prossime 2 ore</Text>}
     {specificStop && stop ? <GlassSurface style={s.card}><Text style={s.heading}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassSurface> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
     <RequestState state={state} />
     {openingRoute && <View style={s.row}><ActivityIndicator color="#a01d35" /><Text style={s.muted}>Apertura itinerario…</Text></View>}
     {!!navigationError && <Notice text={navigationError} />}
     {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
-    {stop && <Button text="Aggiorna arrivi" onPress={state.retry} disabled={state.loading} />}
     {state.data && <>
       <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
-      <Text style={s.label}>{arrivals.length} {arrivals.length === 1 ? 'arrivo disponibile' : 'arrivi disponibili'} per questa fermata</Text>
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={s.route} onPress={() => { void openArrival(a); }}>
         <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Previsione live · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
-        <View style={s.arrivalTime}><Text style={s.time}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={s.small}>{clock(a.time)} ›</Text></View>
+        <View style={s.arrivalTime}><Text style={[s.time, a.kind === 'live' && s.liveEta]}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.liveEta]}>{clock(a.time)} ›</Text></View>
       </GlassPressable>)}
     </>}
   </View>;
 }
 
 export function Planner() {
+  const { register } = useRefresh();
   const [origin, setOrigin] = useState<Stop | null>(null);
   const [destination, setDestination] = useState<Stop | null>(null);
   const [journey, setJourney] = useState<Journey | null>(null);
@@ -232,14 +243,15 @@ export function Planner() {
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
   const reset = () => { request.current?.abort(); setJourney(null); setError(''); setLoading(false); };
-  const calculate = async () => {
+  const calculate = useCallback(async () => {
     if (!origin || !destination) return;
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
     setLoading(true); setJourney(null); setError('');
     try { setJourney(await api<Journey>(`plan?from=${encodeURIComponent(origin.stop_id)}&to=${encodeURIComponent(destination.stop_id)}`, controller.signal)); }
     catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
     finally { if (!controller.signal.aborted) setLoading(false); }
-  };
+  }, [origin, destination]);
+  useEffect(() => { if (journey) return register(async () => { await calculate(); }); }, [register, calculate, journey]);
   return <View style={s.stack}><Text style={s.heading}>Dove vuoi andare?</Text><Text style={s.muted}>Percorsi fra fermate, con partenza adesso</Text>
     <StopSearch label="Da" selected={origin} onSelect={v => { reset(); setOrigin(v); }} /><StopSearch label="A" selected={destination} onSelect={v => { reset(); setDestination(v); }} />
     <Button text={loading ? 'Calcolo in corso…' : 'Trova percorso →'} disabled={!origin || !destination || loading} onPress={() => { void calculate(); }} />
@@ -265,6 +277,7 @@ const s = StyleSheet.create({
   route: { padding: 16, flexDirection: 'row', gap: 14, alignItems: 'center' },
   badge: { minWidth: 52, borderRadius: 18, padding: 12, backgroundColor: 'rgba(150,0,45,0.10)', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(150,0,45,0.08)' }, badgeText: { color: '#96002d', fontSize: 18, fontWeight: '800' },
   arrow: { fontSize: 28, color: '#a01d35' }, time: { fontSize: 20, fontWeight: '700', color: '#202d3a' },
+  liveEta: { color: '#167450' },
   arrivalTime: { alignItems: 'flex-end', gap: 4 },
   button: { padding: 16, borderRadius: 24, alignItems: 'center' }, buttonText: { color: '#96002d', fontWeight: '700', fontSize: 15 },
   notice: { padding: 14, borderRadius: 20, marginVertical: 8 }, card: { borderRadius: 24, padding: 18, gap: 12 },

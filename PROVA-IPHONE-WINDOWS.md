@@ -69,7 +69,7 @@ Mantieni entrambe le finestre aperte durante la prova. `localhost` e `127.0.0.1`
 All’apertura trovi l’intestazione originale e sotto i tre pulsanti della home. Nelle ricerche compaiono soltanto le schede Linee/Fermate/Percorso in alto. Nei dettagli il ritorno in alto a sinistra rimane visibile durante lo scorrimento.
 
 - **Linee**: cerca una linea, scegli la direzione e consulta le partenze dal capolinea (−10 / +60 minuti). Nell’elenco fermate, le miniature a sinistra indicano i bus fermi o in arrivo; toccale per i dettagli, oppure tocca una fermata per gli arrivi.
-- **Fermate**: cerca una fermata oppure tocca la freccia accanto al nome di una fermata del percorso. Mostra tutti gli arrivi disponibili di tutte le linee nelle prossime due ore, con attesa e orario. Usa “Aggiorna arrivi” per ricaricare e il tasto fisso “Torna alla linea” per riprendere la direzione selezionata. Quando disponibile, il numero vettura compare dopo “Previsione live”. Toccando una linea in arrivo si apre direttamente il suo itinerario e l’elenco dei bus in transito.
+- **Fermate**: cerca una fermata oppure tocca la freccia accanto al nome di una fermata del percorso. Mostra tutti gli arrivi disponibili di tutte le linee nelle prossime due ore, con attesa e orario. Trascina verso il basso per ricaricare e il tasto fisso “Torna alla linea” per riprendere la direzione selezionata. Quando disponibile, il numero vettura compare dopo “Previsione live”. Toccando una linea in arrivo si apre direttamente il suo itinerario e l’elenco dei bus in transito.
 - **Percorso**: seleziona due fermate e calcola un itinerario solo autobus. Il calcolo usa gli orari programmati, non il traffico live.
 
 Se i feed live non sono raggiungibili, l’app lo indica; senza GTFS importato le ricerche non sono disponibili. Aggiorna gli orari con `npm run data:import` prima della prova o almeno ogni giorno.
@@ -98,7 +98,7 @@ Arresta backend ed Expo con Ctrl+C nelle rispettive finestre. Scarica dal browse
 
 Riavvia il backend nella prima finestra con `set API_HOST=0.0.0.0` e `npm run api`. Nella seconda mantieni `EXPO_PUBLIC_API_URL` con l’indirizzo del PC e avvia `npm start -- --clear --lan`, poi scansiona il nuovo QR. Occorre aggiornare sia il backend sia l’app: il nuovo elenco di direzioni usa l’API aggiornata.
 
-Le posizioni dei bus vengono rilette ogni 15 secondi e le misure più vecchie di 90 secondi vengono indicate in grigio come ultima posizione nota; tutte scadono dopo 180 secondi. Le vetture omesse da un aggiornamento vengono conservate per un massimo di 45 secondi dall’ultima presenza, mantenendo il timestamp originale. Nel dettaglio del bus è visibile il timestamp con i secondi. Se il GPS contraddice la vecchia fermata, l’app può aggiornare la collocazione in modo approssimato (≈); se la fonte ripete le stesse coordinate, non viene simulato uno spostamento. Per queste modifiche aggiornare anche `server`, oltre a `App.tsx` e all’intera cartella `src`.
+Le posizioni dei bus e gli arrivi vengono riletti ogni 30 secondi. Trascinando verso il basso puoi richiedere un aggiornamento immediato. Lo storico dei bus omessi dal feed non viene mostrato sul percorso e le misure oltre 90 secondi vengono rimosse. Nel dettaglio del bus è visibile il timestamp con i secondi. Se il GPS contraddice la vecchia fermata, l’app può correggere la collocazione in modo approssimato (≈); se la fonte non aggiorna la posizione, non viene simulato uno spostamento. Il numero vettura è la label pubblica della fonte, quando presente; gli ID tecnici non sono matricole. Per queste modifiche aggiornare anche `server`, oltre a `App.tsx` e all’intera cartella `src`.
 
 Se una riga degli arrivi non apriva l’itinerario, aggiorna `App.tsx` e tutta `src`: il nuovo client gestisce anche le risposte del vecchio servizio. Per vedere i numeri vettura disponibili occorre aggiornare anche tutta `server` e riavviare il backend: `http://IP-DEL-PC:8000/api/status` deve contenere `"apiVersion": 2`. Il campo “vettura non disponibile” significa che il servizio non ha fornito un’identificazione utilizzabile; non è un numero da stimare.
 
@@ -144,3 +144,12 @@ npm start -- --clear --lan
 ```
 
 Mantieni `EXPO_PUBLIC_API_URL` impostato all’IP del PC e il backend aperto nell’altra finestra. Questo aggiornamento grafico non richiede una nuova importazione degli orari né modifiche al backend. La barra inferiore compare in tutte le schermate fuori dalla home. Liquid Glass nativo richiede un iPhone e un runtime compatibili (iOS 26+); sugli altri sistemi viene usato il vetro sfocato. Se hai attivato “Riduci trasparenza” nelle impostazioni Accessibilità di iOS, le superfici sono opache.
+
+
+## Aggiornare refresh, posizione bus e arrivi
+
+Ferma backend ed Expo. Dallo ZIP aggiornato di `main` copia `App.tsx`, tutta `src` (incluso `lib/Refresh.tsx`) e i file di `server`, unendo le cartelle e sostituendo i file. **Conserva `server\data`, `.venv` e `.env`**. Questo aggiornamento non aggiunge dipendenze e non richiede di importare nuovamente gli orari.
+
+Riavvia il backend con `set API_HOST=0.0.0.0` e `npm run api`. Nell’altra finestra mantieni `EXPO_PUBLIC_API_URL` impostato all’IP del PC e avvia `npm start -- --clear --lan`. Scansiona il nuovo QR.
+
+In Direzione e Autobus in arrivo l’aggiornamento automatico è ogni 30 secondi; trascina dall’alto verso il basso per aggiornare subito. Il vecchio pulsante Aggiorna arrivi è stato rimosso. Gli ETA live sono verdi. Per i numeri vettura corretti e il bypass della cache serve aggiornare e riavviare anche il backend.

@@ -5,14 +5,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
 
 type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
-type Vehicle = { id: string; timestamp: number; status: string; estimated: boolean; retained?: boolean; timestampSource?: string; lat: number | null; lon: number | null };
+type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; estimated: boolean; retained?: boolean; timestampSource?: string; lat: number | null; lon: number | null };
 type Stop = { stop_id: string; name: string; sequence: number; vehiclesAt: Vehicle[]; vehiclesBefore: Vehicle[] };
 type Directions = { route: Route; variants: Variant[] };
 type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: { tripId: string; serviceDate: string; time: number; scheduledTime: number; kind: string }[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
 
 export function RouteDirections() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const state = useData<Directions>(id ? `routes/${encodeURIComponent(id)}` : null, 60000, true);
+  const state = useData<Directions>(id ? `routes/${encodeURIComponent(id)}` : null, 30000, true);
   return <View style={s.stack}>
     <RequestState state={state} />
     {state.data && <>
@@ -28,27 +28,31 @@ export function RouteDirections() {
 }
 
 function BusThumbnail({ vehicle, caption, onPress }: { vehicle: Vehicle; caption: string; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.id}, ${caption}${vehicle.retained ? ', ultima posizione nota' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
-    <View style={[s.busBody, vehicle.estimated && s.estimatedBus, vehicle.retained && s.retainedBus]}><View style={s.destinationPanel} /><View style={s.windshield} /><View style={s.lights}><View style={s.light} /><View style={s.light} /></View><View style={s.wheels}><View style={s.wheel} /><View style={s.wheel} /></View></View>
-    <Text numberOfLines={1} style={s.busId}>{vehicle.estimated ? '≈ ' : ''}{vehicle.id}</Text>
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.retained ? ', ultima posizione nota' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
+    <View style={[s.busBody, vehicle.estimated && s.estimatedBus]}>
+      <View style={s.busWindows}><View style={s.busWindow} /><View style={s.busWindow} /><View style={s.busDoor} /><View style={s.busFront} /></View>
+      <View style={s.wheels}><View style={s.wheel} /><View style={s.wheel} /></View>
+    </View>
+    <Text numberOfLines={1} style={s.busId}>{vehicle.vehicleId || '—'}</Text>
   </Pressable>;
 }
 
 const positionStamp = (timestamp: number | null) => timestamp ? `Posizioni alle ${new Date(timestamp * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Nessun aggiornamento';
-const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 180;
+const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 90 && !vehicle.retained;
 export function RouteTimeline() {
   const { id, variant } = useLocalSearchParams<{ id: string; variant: string }>();
-  const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 15000, true);
+  const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 30000, true);
   const [vehicleInfo, setVehicleInfo] = useState<{ id: string; stopName: string } | null>(null);
-  const [now, setNow] = useState(() => Date.now() / 1000);
+  const [tick, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
     return () => clearInterval(timer);
   }, []);
+  const now = Math.max(tick, state.receivedAt);
   const data = state.data;
   const departures = data?.departures.filter(d => now - 600 <= d.time && d.time <= now + 3600) || [];
-  const selected = data?.stops.flatMap(stop => [...stop.vehiclesAt, ...stop.vehiclesBefore]).find(v => v.id === vehicleInfo?.id && fresh(v, now));
-  const vehicleCount = data?.stops.reduce((total, stop) => total + [...stop.vehiclesAt, ...stop.vehiclesBefore].filter(v => fresh(v, now)).length, 0) || 0;
+  const selected = data?.stops.flatMap(stop => [...stop.vehiclesAt, ...stop.vehiclesBefore]).find(v => v.id === vehicleInfo?.id && fresh(v, now) && !state.error);
+  const vehicleCount = data?.stops.reduce((total, stop) => total + [...stop.vehiclesAt, ...stop.vehiclesBefore].filter(v => fresh(v, now) && !state.error).length, 0) || 0;
   return <View style={s.stack}>
     <RequestState state={state} />
     {data && <>
@@ -63,14 +67,17 @@ export function RouteTimeline() {
       <Text style={s.heading}>Fermate</Text>
       <GlassSurface style={s.timeline}>
         {data.stops.map((stop, i) => {
-          const before = stop.vehiclesBefore.filter(v => fresh(v, now)), at = stop.vehiclesAt.filter(v => fresh(v, now));
+          const before = stop.vehiclesBefore.filter(v => fresh(v, now) && !state.error), at = stop.vehiclesAt.filter(v => fresh(v, now) && !state.error);
           return <View key={`${stop.stop_id}-${stop.sequence}`}>
-            {!!before.length && <View style={s.incomingRow}>
-              <View style={s.vehicleLane}>{before.map((v, j) => <BusThumbnail key={`${v.id}-${j}`} vehicle={{ ...v, retained: v.retained || Boolean(state.error) || now - v.timestamp > 90 }} caption={`in arrivo a ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}</View>
-              <View style={s.rail}><View style={s.line} /></View><View style={s.flex} />
-            </View>}
             <View style={s.timelineRow}>
-              <View style={s.vehicleLane}>{at.map((v,j) => <BusThumbnail key={`${v.id}-${j}`} vehicle={{ ...v, retained: v.retained || Boolean(state.error) || now - v.timestamp > 90 }} caption={`alla fermata ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}</View>
+              <View style={s.vehicleLane}>
+                {!!before.length && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.busBefore} contentContainerStyle={s.busTrack}>
+                  {before.map(v => <BusThumbnail key={v.id} vehicle={v} caption={`in arrivo a ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}
+                </ScrollView>}
+                {!!at.length && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.busAt} contentContainerStyle={s.busTrack}>
+                  {at.map(v => <BusThumbnail key={v.id} vehicle={v} caption={`alla fermata ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}
+                </ScrollView>}
+              </View>
               <View style={s.rail}><View style={[s.line, i === 0 && !before.length && s.invisible]} /><View style={[s.stopDot, i === data.stops.length - 1 && s.lastStop]} /><View style={[s.line, i === data.stops.length - 1 && s.invisible]} /></View>
               <Pressable accessibilityRole="button" accessibilityLabel={`Fermata ${stop.name}, codice ${stop.stop_id}, mostra arrivi`} style={s.stopName} onPress={() => router.push({ pathname: '/stop/[stopId]', params: { stopId: stop.stop_id, stopName: stop.name, fromRouteId: id, fromVariant: variant, fromLine: data.route.name } })}>
                 <View style={s.stopTitle}><Text style={[s.stopText, s.flex]}>{stop.name}</Text><Text style={s.stopArrow}>›</Text></View><Text style={s.small}>{i === 0 ? 'Capolinea di partenza · ' : i === data.stops.length - 1 ? 'Capolinea di arrivo · ' : ''}{stop.stop_id}</Text>
@@ -78,17 +85,17 @@ export function RouteTimeline() {
             </View>
 
       {selected && vehicleInfo && [...stop.vehiclesAt, ...stop.vehiclesBefore].some(v => v.id === selected.id) && <GlassSurface accessibilityRole="alert" style={s.vehicleInfo}>
-        <View style={s.row}><Text style={[s.heading, s.flex]}>Bus {selected.id}</Text><Pressable accessibilityRole="button" accessibilityLabel="Chiudi dettagli autobus" onPress={() => setVehicleInfo(null)}><Text style={s.close}>×</Text></Pressable></View>
-        <Text style={s.muted}>{selected.retained || Boolean(state.error) || now - selected.timestamp > 90 ? 'Ultima posizione nota vicino a' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {vehicleInfo.stopName}</Text><Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
-        {selected.lat !== null && selected.lon !== null && <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(`https://maps.apple.com/?ll=${selected.lat},${selected.lon}&q=Bus%20${encodeURIComponent(data.route.name)}`); }}><Text style={s.link}>Apri posizione in Mappe ↗</Text></Pressable>}
+        <View style={s.row}><Text style={[s.heading, s.flex]}>Vettura {selected.vehicleId || 'non disponibile'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Chiudi dettagli autobus" onPress={() => setVehicleInfo(null)}><Text style={s.close}>×</Text></Pressable></View>
+        <Text style={s.muted}>{selected.retained || Boolean(state.error) || now - selected.timestamp > 90 ? 'Ultima posizione nota vicino a' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text><Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
+        {selected.lat !== null && selected.lon !== null && <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(`https://maps.apple.com/?ll=${selected.lat},${selected.lon}&q=Bus%20${encodeURIComponent(selected.vehicleId || data.route.name)}`); }}><Text style={s.link}>Apri posizione in Mappe ↗</Text></Pressable>}
       </GlassSurface>}
           </View>;
         })}
       </GlassSurface>
-      <Text style={s.small}>{data.liveAvailable ? `${positionStamp(data.timestamp)} · ogni 15 s` : 'Posizioni live non disponibili'}</Text>
+      <Text style={s.small}>{data.liveAvailable ? `${positionStamp(data.timestamp)} · ogni 30 s` : 'Posizioni live non disponibili'}</Text>
       {data.liveAvailable && !vehicleCount && <Notice text="Nessun bus localizzabile su questa direzione dal feed attuale. Non indica necessariamente assenza di servizio." />}
       {!!data.unplacedVehicleCount && <Notice text={`${data.unplacedVehicleCount} posizioni non associabili alle fermate: non vengono collocate sul percorso.`} />}
-      <Text style={s.legend}>Bus tra due fermate: in arrivo alla successiva. ≈ indica una posizione GPS approssimata.</Text>
+      <Text style={s.legend}>Icone: ultime posizioni ricevute, aggiornate ogni 30 s. Le misure oltre 90 s o conservate dallo storico non sono mostrate. ≈ indica un’associazione GPS approssimata.</Text>
 
     </>}
   </View>;
@@ -102,10 +109,14 @@ const s = StyleSheet.create({
   departureStrip: { gap: 3, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 },
   departureLabel: { flexShrink: 0, fontSize: 11, color: '#596878', fontWeight: '600' }, departureScroller: { height: 26 }, departureTrack: { minHeight: 26, alignItems: 'center', gap: 14, paddingRight: 6 }, departureTime: { fontSize: 14, color: '#202d3a', fontWeight: '700' }, departureKind: { fontSize: 10, fontWeight: '400' }, liveTime: { color: '#167450' }, pastTime: { color: '#8b9298' },
   legend: { fontSize: 11, lineHeight: 17, color: '#596878' },
-  timeline: { borderRadius: 26, paddingVertical: 14, paddingRight: 14, overflow: 'hidden' }, incomingRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 24 }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
-  vehicleLane: { width: 48, justifyContent: 'center', alignItems: 'center', paddingVertical: 1, gap: 2 }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: '#16845e', minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', borderWidth: 2, borderColor: '#16845e' }, lastStop: { backgroundColor: '#a01d35', borderColor: '#a01d35', borderRadius: 2 },
+  timeline: { borderRadius: 26, paddingVertical: 14, paddingRight: 14, overflow: 'hidden' }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
+  vehicleLane: { width: 64, justifyContent: 'center', alignItems: 'center' }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: '#16845e', minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', borderWidth: 2, borderColor: '#16845e' }, lastStop: { backgroundColor: '#a01d35', borderColor: '#a01d35', borderRadius: 2 },
   stopName: { flex: 1, justifyContent: 'center', paddingLeft: 12, paddingVertical: 10, minHeight: 48 }, stopText: { color: '#a01d35', fontWeight: '700', fontSize: 15, lineHeight: 21 },
   stopTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stopArrow: { color: '#a01d35', fontSize: 22 },
-  busButton: { width: 36, minHeight: 24, alignItems: 'center', justifyContent: 'center', paddingVertical: 1 }, busBody: { width: 12, height: 15, backgroundColor: '#a01d35', borderRadius: 4, padding: 2, justifyContent: 'space-between' }, retainedBus: { backgroundColor: '#92989d' }, estimatedBus: { backgroundColor: '#8c6a2e' }, destinationPanel: { height: 2, backgroundColor: '#f4d991', borderRadius: 1 }, windshield: { height: 5, backgroundColor: '#f8f6f2', borderRadius: 2 }, lights: { flexDirection: 'row', justifyContent: 'space-between' }, light: { width: 3, height: 2, borderRadius: 1, backgroundColor: '#fff1a8' }, wheels: { position: 'absolute', bottom: -2, left: 2, right: 2, flexDirection: 'row', justifyContent: 'space-between' }, wheel: { width: 3, height: 4, backgroundColor: '#202d3a', borderRadius: 1 }, busId: { fontSize: 8, color: '#a01d35', marginTop: 1, maxWidth: 36 },
+  busBefore: { position: 'absolute', top: -12, left: 0, right: 0, height: 26 }, busAt: { height: 26, flexGrow: 0, width: '100%' }, busTrack: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  busButton: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },
+  busBody: { width: 24, height: 12, borderRadius: 3, backgroundColor: '#a01d35', padding: 2, marginBottom: 2 }, estimatedBus: { backgroundColor: '#8c6a2e' },
+  busWindows: { flexDirection: 'row', gap: 1, alignItems: 'flex-start' }, busWindow: { width: 4, height: 4, backgroundColor: '#fff', borderRadius: 1 }, busDoor: { width: 3, height: 7, backgroundColor: '#f8f6f2' }, busFront: { width: 4, height: 5, backgroundColor: '#fff', borderTopRightRadius: 2 },
+  wheels: { position: 'absolute', bottom: -2, left: 3, right: 3, flexDirection: 'row', justifyContent: 'space-between' }, wheel: { width: 4, height: 4, backgroundColor: '#202d3a', borderRadius: 2 }, busId: { fontSize: 8, lineHeight: 10, color: '#a01d35', maxWidth: 30 },
   vehicleInfo: { borderRadius: 20, margin: 10, padding: 16, gap: 8 }, link: { color: '#a01d35', fontSize: 14, fontWeight: '600' }, close: { fontSize: 28, color: '#a01d35', paddingHorizontal: 10 },
 });

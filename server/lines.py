@@ -142,7 +142,7 @@ def place_vehicles(group, groups, sequences, now, live):
             continue
         vehicle = entity.vehicle
         timestamp = int(vehicle.timestamp or live['timestamp'])
-        if not 0 <= now - timestamp <= 180:
+        if entity.id in live.get('retained', ()) or not live['available'] or not 0 <= now - timestamp <= 90:
             continue
         if vehicle.trip.HasField('direction_id') and group['direction'] and str(vehicle.trip.direction_id) != group['direction']:
             continue
@@ -208,7 +208,7 @@ def place_vehicles(group, groups, sequences, now, live):
             continue
         stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
         placement = placement_override or ('at' if stopped or estimated else 'before')
-        item = {'id': vehicle.vehicle.id or entity.id, 'timestamp': timestamp,
+        item = {'id': vehicle.vehicle.id or entity.id, 'vehicleId': vehicle.vehicle.label.strip() or None, 'timestamp': timestamp,
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
                 'estimated': estimated, 'placement': placement,
                 'retained': entity.id in live.get('retained', ()) or now - timestamp > 90 or not live['available'],
@@ -219,7 +219,7 @@ def place_vehicles(group, groups, sequences, now, live):
     return stops, unplaced
 
 
-def line_detail(route_id, variant=None, now=None):
+def line_detail(route_id, variant=None, now=None, refresh=False):
     use_current_clock = now is None
     now = int(time.time()) if now is None else now
     with t.connect() as db:
@@ -239,8 +239,8 @@ def line_detail(route_id, variant=None, now=None):
     selected = next((g for g in groups if g['id'] == variant), None)
     if selected is None:
         raise ValueError('Direzione non disponibile: torna alla scelta della direzione')
-    vehicles = t.realtime.read('vehicles')
-    updates = t.realtime.read('updates')
+    vehicles = t.read_live('vehicles', refresh)
+    updates = t.read_live('updates', refresh)
     if use_current_clock:
         # Fetching may take seconds: evaluate freshness after the feed arrives.
         now = int(time.time())

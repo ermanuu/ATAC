@@ -23,7 +23,7 @@ class LineTests(unittest.TestCase):
         t.import_gtfs(fixture())
         self.now = int(datetime(2026, 10, 30, 10, 0, tzinfo=t.ROME).timestamp())
         self.feeds = {}
-        self.reader = patch.object(t.realtime, 'read', side_effect=lambda kind: self.feeds.get(kind, {'available': False, 'timestamp': None}))
+        self.reader = patch.object(t.realtime, 'read', side_effect=lambda kind, **kwargs: self.feeds.get(kind, {'available': False, 'timestamp': None}))
         self.read = self.reader.start()
         self.addCleanup(self.reader.stop)
 
@@ -80,9 +80,29 @@ class LineTests(unittest.TestCase):
         now = int(datetime(2026, 10, 31, 10, 0, tzinfo=t.ROME).timestamp())
         self.assertEqual(t.route_detail('r1', now=now)['variants'], [])
 
-    def test_old_position_is_marked_as_last_known(self):
+    def test_old_position_is_not_drawn_as_current(self):
         self.vehicle(self.feed('vehicles'), 'old', sequence=10, timestamp=self.now-91)
-        self.assertTrue(self.board()['stops'][0]['vehiclesAt'][0]['retained'])
+        self.assertEqual(self.board()['stops'][0]['vehiclesAt'], [])
+
+    def test_board_uses_public_label_not_tracking_id(self):
+        v=self.vehicle(self.feed('vehicles'), 'technical-123', sequence=10)
+        v.vehicle.label='4512'
+        item=self.board()['stops'][0]['vehiclesAt'][0]
+        self.assertEqual(item['id'], 'technical-123')
+        self.assertEqual(item['vehicleId'], '4512')
+        v.vehicle.ClearField('label')
+        self.assertIsNone(self.board()['stops'][0]['vehiclesAt'][0]['vehicleId'])
+
+    def test_history_only_positions_are_not_current_bus_icons(self):
+        self.vehicle(self.feed('vehicles'), 'missing', sequence=10)
+        self.feeds['vehicles']['retained']=['missing']
+        self.assertEqual(self.board()['stops'][0]['vehiclesAt'], [])
+
+    def test_manual_board_refresh_forces_both_sources(self):
+        selected=self.variant()
+        t.route_detail('r1', selected, self.now, refresh=True)
+        self.assertEqual(self.read.call_args_list[-2].kwargs, {'force':True})
+        self.assertEqual(self.read.call_args_list[-1].kwargs, {'force':True})
 
     def test_departure_window_includes_exact_bounds(self):
         for name, at in [('too_early', 35399), ('start',35400), ('recent',35940), ('end',39600), ('too_late',39601)]:
@@ -155,7 +175,7 @@ class LineTests(unittest.TestCase):
         self.vehicle(f,'stopped',sequence=10,stop='a')
         self.vehicle(f,'moving',sequence=20,stop='b',status=pb.VehiclePosition.IN_TRANSIT_TO)
         self.vehicle(f,'opposite',trip='night',sequence=1,stop='a')
-        self.vehicle(f,'stale',sequence=10,timestamp=self.now-181)
+        self.vehicle(f,'stale',sequence=10,timestamp=self.now-91)
         conflicting = self.vehicle(f,'conflicting-direction',sequence=10,stop='a')
         conflicting.trip.direction_id = 1
         result=self.board()
@@ -213,10 +233,10 @@ class LineTests(unittest.TestCase):
         self.assertFalse(board['stops'][1]['vehiclesBefore'])
         self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['id'],'passed')
 
-    def test_vehicle_icon_expires_after_three_minutes(self):
+    def test_vehicle_icon_expires_after_ninety_seconds(self):
         feed=self.feed('vehicles')
-        self.vehicle(feed,'expired',sequence=10,timestamp=self.now-181)
-        self.vehicle(feed,'boundary',sequence=10,timestamp=self.now-180)
+        self.vehicle(feed,'expired',sequence=10,timestamp=self.now-91)
+        self.vehicle(feed,'boundary',sequence=10,timestamp=self.now-90)
         self.assertEqual([v['id'] for v in self.board()['stops'][0]['vehiclesAt']],['boundary'])
 
     def test_feed_updated_during_download_is_not_discarded_as_future(self):

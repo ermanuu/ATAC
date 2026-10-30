@@ -5,6 +5,7 @@ from google.transit import gtfs_realtime_pb2 as pb
 class PositionHistory:
     def __init__(self):
         self.entries = {}
+        self.measurements = {}
 
     def merge(self, feed, now):
         seen = set()
@@ -23,7 +24,24 @@ class PositionHistory:
                 clone.CopyFrom(entity)
                 # Preserve the original measurement time when later feeds omit it.
                 clone.vehicle.timestamp = entity.vehicle.timestamp or feed.header.timestamp
-                self.entries[key] = (clone, now, bool(entity.vehicle.timestamp))
+                previous = self.entries.get(key)
+                own_timestamp = bool(entity.vehicle.timestamp)
+                if previous and clone.vehicle.timestamp < previous[0].vehicle.timestamp:
+                    # A delayed response must not move the bus backwards.
+                    continue
+                value = pb.VehiclePosition()
+                value.CopyFrom(clone.vehicle)
+                value.ClearField('timestamp')
+                value.ClearField('vehicle')
+                fingerprint = value.SerializeToString(deterministic=True)
+                measurement = self.measurements.get(key)
+                if not own_timestamp and measurement and measurement[0] == fingerprint:
+                    # Keep this even after the visible history entry expires: a
+                    # changing feed header cannot revive an unchanged old bus.
+                    clone.vehicle.timestamp = measurement[1]
+                self.measurements[key] = (fingerprint, clone.vehicle.timestamp, now)
+                self.entries[key] = (clone, now, own_timestamp)
+        self.measurements = {key: value for key, value in self.measurements.items() if now - value[2] <= 21600}
         result = pb.FeedMessage()
         result.header.gtfs_realtime_version = '2.0'
         result.header.timestamp = int(now)

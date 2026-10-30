@@ -13,18 +13,19 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         params = parse_qs(url.query)
         query = lambda name: params.get(name, [""])[0]
+        refresh_options = {"refresh": True} if query("fresh") == "1" else {}
         parts = [unquote(p) for p in url.path.strip("/").split("/")]
         try:
             if parts == ["api", "status"]:
-                result = transit.status()
+                result = transit.status(**refresh_options)
             elif parts == ["api", "routes"]:
                 result = transit.routes(query("q"))
             elif len(parts) == 3 and parts[:2] == ["api", "routes"]:
-                result = transit.route_detail(parts[2], query("variant") or None)
+                result = transit.route_detail(parts[2], query("variant") or None, **refresh_options)
             elif parts == ["api", "stops"]:
                 result = transit.stops(query("q")) if len(query("q")) >= 2 else []
             elif len(parts) == 4 and parts[:2] == ["api", "stops"] and parts[3] == "arrivals":
-                result = transit.arrivals(parts[2])
+                result = transit.arrivals(parts[2], **refresh_options)
             elif parts == ["api", "plan"]:
                 result = transit.plan(query("from"), query("to"))
             else:

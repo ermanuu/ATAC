@@ -55,6 +55,41 @@ class PositionsTests(unittest.TestCase):
         e = f.entity.add(); e.id = 'position'; e.is_deleted = True
         self.assertEqual(len(h.merge(f, 1015)[0].entity), 0)
 
+    def test_header_change_does_not_refresh_identical_measurement(self):
+        h=PositionHistory(); h.merge(feed(1000, timestamp=False),1000)
+        merged, _, _=h.merge(feed(1030, timestamp=False),1030)
+        self.assertEqual(merged.entity[0].vehicle.timestamp,1000)
+        changed=feed(1060,timestamp=False); changed.entity[0].vehicle.current_stop_sequence=2
+        merged, _, _=h.merge(changed,1060)
+        self.assertEqual(merged.entity[0].vehicle.timestamp,1060)
+
+    def test_header_only_measurement_does_not_revive_after_history_expiry(self):
+        h=PositionHistory(); h.merge(feed(1000,timestamp=False),1000)
+        self.assertEqual(len(h.merge(feed(1181,timestamp=False),1181)[0].entity),0)
+        self.assertEqual(len(h.merge(feed(1210,timestamp=False),1210)[0].entity),0)
+        h.merge(feed(1256,include=False),1256)
+        self.assertEqual(len(h.merge(feed(1280,timestamp=False),1280)[0].entity),0)
+        changed=feed(1300,timestamp=False); changed.entity[0].vehicle.current_stop_sequence=3
+        merged, _, _=h.merge(changed,1300)
+        self.assertEqual(merged.entity[0].vehicle.timestamp,1300)
+
+    def test_older_response_cannot_revert_current_position(self):
+        h=PositionHistory()
+        newer=feed(1030); newer.entity[0].vehicle.current_stop_sequence=3
+        h.merge(newer,1030)
+        older=feed(1000); older.entity[0].vehicle.current_stop_sequence=1
+        merged, _, _=h.merge(older,1040)
+        self.assertEqual(merged.entity[0].vehicle.current_stop_sequence,3)
+        self.assertEqual(merged.entity[0].vehicle.timestamp,1030)
+
+    def test_force_refresh_bypasses_realtime_cache(self):
+        reader=t.Realtime()
+        with patch.object(t.time,'time',return_value=1000), patch.object(t,'download',return_value=feed(1000).SerializeToString()) as fetch:
+            reader.read('vehicles'); reader.read('vehicles')
+            self.assertEqual(fetch.call_count,1)
+            reader.read('vehicles',force=True)
+            self.assertEqual(fetch.call_count,2)
+
     def test_download_failure_preserves_bounded_last_known_feed(self):
         reader = t.Realtime()
         with patch.object(t.time, 'time', return_value=1000) as clock, patch.object(t, 'download', return_value=feed(1000).SerializeToString()) as download:

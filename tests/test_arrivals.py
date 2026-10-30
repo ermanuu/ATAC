@@ -102,7 +102,7 @@ class StopArrivalsTests(unittest.TestCase):
         updates=self.feed(); e=updates.entity.add(); e.id='prediction'; e.trip_update.trip.trip_id='t1'
         stop=e.trip_update.stop_time_update.add(); stop.stop_sequence=20; stop.arrival.delay=60
         positions=pb.FeedMessage(); positions.header.gtfs_realtime_version='2.0'; positions.header.timestamp=self.now
-        e=positions.entity.add(); e.id='position'; v=e.vehicle; v.trip.trip_id='t1'; v.trip.route_id='r1'; v.vehicle.id='5678'; v.timestamp=self.now
+        e=positions.entity.add(); e.id='position'; v=e.vehicle; v.trip.trip_id='t1'; v.trip.route_id='r1'; v.vehicle.id='internal-5678'; v.vehicle.label='5678'; v.timestamp=self.now
         with patch.object(t.realtime,'read',side_effect=lambda kind:{'available':True,'timestamp':self.now,'feed':updates if kind=='updates' else positions}):
             item=next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')
             self.assertEqual(item['vehicleId'],'5678')
@@ -111,6 +111,12 @@ class StopArrivalsTests(unittest.TestCase):
                 self.assertEqual(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'],'5678')
             v.timestamp=self.now-91
             self.assertIsNone(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'])
+
+    def test_internal_identifiers_are_not_public_fleet_numbers(self):
+        f=self.feed(); e=f.entity.add(); e.id='entity-123'
+        u=e.trip_update; u.trip.trip_id='t1'; u.vehicle.id='technical-456'
+        event=u.stop_time_update.add(); event.stop_sequence=20; event.arrival.delay=60
+        self.assertIsNone(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'])
 
     def test_missing_vehicle_number_is_not_invented(self):
         self.assertTrue(all(a['vehicleId'] is None for a in t.arrivals('b')['arrivals']))

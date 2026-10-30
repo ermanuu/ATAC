@@ -150,12 +150,12 @@ class Realtime:
         from .positions import PositionHistory
         self.positions = PositionHistory()
 
-    def read(self, kind):
+    def read(self, kind, force=False):
         with self.lock:
             cached = self.cache.get(kind)
             now = time.time()
             ttl = 10 if kind == "vehicles" else 30
-            if cached and now - cached[0] < ttl:
+            if not force and cached and now - cached[0] < ttl:
                 value = cached[1]
                 if not value["available"] or -60 <= now - value["timestamp"] <= 180:
                     return value
@@ -180,7 +180,11 @@ class Realtime:
 realtime = Realtime()
 
 
-def status():
+def read_live(kind, refresh=False):
+    return realtime.read(kind, force=True) if refresh else realtime.read(kind)
+
+
+def status(refresh=False):
     result = {"apiVersion": 2, "provider": "Roma Servizi per la Mobilità", "staticAvailable": False,
               "staticImportedAt": None, "vehiclesUrl": VEHICLES_URL, "updatesUrl": UPDATES_URL}
     if DB.exists():
@@ -189,7 +193,7 @@ def status():
             result["staticAvailable"] = True
             result["serviceToday"] = bool(active_services(db, datetime.now(ROME).date()))
     for kind in ("vehicles", "updates"):
-        live = realtime.read(kind)
+        live = read_live(kind, refresh)
         result[kind] = {k: v for k, v in live.items() if k != "feed"}
     return result
 
@@ -204,12 +208,12 @@ def stops(query):
         return [dict(r) for r in db.execute("SELECT * FROM stops WHERE name LIKE ? OR stop_id=? ORDER BY name LIMIT 30", (f"%{query}%", query))]
 
 
-def route_detail(route_id, variant=None, now=None):
+def route_detail(route_id, variant=None, now=None, refresh=False):
     from .lines import line_detail
-    return line_detail(route_id, variant, now)
+    return line_detail(route_id, variant, now, refresh=refresh)
 
 
-def arrivals(stop_id):
+def arrivals(stop_id, refresh=False):
     from .lines import variant_id
     now = int(time.time())
     scheduled = []
@@ -222,7 +226,7 @@ def arrivals(stop_id):
                         stop_ids = [s[0] for s in db.execute("SELECT stop_id FROM times WHERE trip_id=? ORDER BY sequence", (r["trip_id"],))]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
                     scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
-    live = realtime.read("updates")
+    live = read_live("updates", refresh)
     if live["available"]:
         by_trip = {}
         for e in live["feed"].entity:
@@ -261,12 +265,12 @@ def arrivals(stop_id):
                 if skipped:
                     continue
                 if item["kind"] == "live" and update.HasField("vehicle"):
-                    item["vehicleId"] = update.vehicle.label or update.vehicle.id or None
+                    item["vehicleId"] = update.vehicle.label.strip() or None
             keep.append(item)
         scheduled = keep
     scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
     if any(i["kind"] == "live" and not i["vehicleId"] for i in scheduled):
-        positions = realtime.read("vehicles")
+        positions = read_live("vehicles", refresh)
         assignments = {}
         assignment_now = int(time.time())
         if positions["available"]:
@@ -275,8 +279,8 @@ def arrivals(stop_id):
                     continue
                 vehicle = entity.vehicle
                 stamp = int(vehicle.timestamp or positions["timestamp"])
-                number = vehicle.vehicle.label or vehicle.vehicle.id
-                if number and 0 <= assignment_now - stamp <= 90:
+                number = vehicle.vehicle.label.strip()
+                if number and entity.id not in positions.get("retained", ()) and 0 <= assignment_now - stamp <= 90:
                     key = (vehicle.trip.trip_id, vehicle.trip.start_date)
                     assignments.setdefault(key, []).append((vehicle.trip.route_id, number))
         for item in scheduled:
