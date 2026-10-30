@@ -173,3 +173,16 @@ Riavvia il backend (`set API_HOST=0.0.0.0`, poi `npm run api`) e nell’altra fi
 - Nel dettaglio di una fermata, tocca ☆ per salvarla e ★ per rimuoverla. Le preferite compaiono nella scheda Fermate e restano salvate dopo la chiusura dell’app.
 - Gli arrivi live sono in testa. I programmati sono il ripiego per le direzioni che non hanno live; non sostituiscono né duplicano una direzione già coperta da previsioni.
 - Se l’icona resta sbagliata, tocca il bus, poi **Condividi dati della vettura → Copia** e incolla il testo nella chat. Questo permette di confrontare i riferimenti reali a PAVESE e COLOMBO, l’ID della corsa e i timestamp, che negli screenshot non sono visibili.
+
+
+## Aggiornare la continuità dell’icona del bus
+
+Ferma Expo con Ctrl+C. Dallo ZIP aggiornato copia tutta `src`, `package.json`, `package-lock.json` e `app.json` in `C:\ATAC`, conservando `.env`, `server\data` e `.venv`.
+
+```bat
+cd /d C:\ATAC
+npm ci
+npm start -- --clear --lan
+```
+
+Mantieni l’indirizzo del backend configurato in `.env` o nella variabile `EXPO_PUBLIC_API_URL`, poi apri il nuovo QR. Il backend può restare aperto. Il nuovo modulo `expo-image` è incluso in Expo Go SDK 58: l’icona viene caricata in memoria una volta per itinerario e riusata nei cambi di fermata. Non è necessario reimportare gli orari.

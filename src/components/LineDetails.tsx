@@ -1,9 +1,12 @@
+import { Image, useImage, type ImageRef } from 'expo-image';
 import { useLineHeader } from '../lib/LineHeader';
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import React, { useEffect, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, api, clock, useData, type Route } from '../../App';
+
+const BUS_ICON = require('../../assets/bus-front.png');
 
 type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
 type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
@@ -28,9 +31,9 @@ export function RouteDirections() {
   </View>;
 }
 
-function BusThumbnail({ vehicle, caption, onPress }: { vehicle: Vehicle; caption: string; onPress: () => void }) {
+function BusThumbnail({ vehicle, caption, onPress, image }: { vehicle: Vehicle; caption: string; onPress: () => void; image: ImageRef | null }) {
   return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.positionSource === 'predictions' ? ', prossima fermata da previsioni live' : vehicle.retained ? ', ultima posizione nota' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
-    <Image source={require('../../assets/bus-front.png')} accessibilityIgnoresInvertColors resizeMode="contain" style={s.busImage} />
+    <Image source={image || BUS_ICON} placeholder={image || BUS_ICON} contentFit="contain" placeholderContentFit="contain" cachePolicy="memory-disk" transition={0} style={s.busImage} />
     <Text numberOfLines={1} style={s.busId}>{vehicle.vehicleId || '—'}</Text>
   </Pressable>;
 }
@@ -38,6 +41,8 @@ function BusThumbnail({ vehicle, caption, onPress }: { vehicle: Vehicle; caption
 const positionStamp = (timestamp: number | null) => timestamp ? `Posizioni alle ${new Date(timestamp * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Nessun aggiornamento';
 const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 90 && !vehicle.retained && (vehicle.positionSource !== 'predictions' || Boolean(vehicle.predictionTimestamp && now - vehicle.predictionTimestamp <= 180));
 export function RouteTimeline() {
+  // Share one decoded bitmap across rows: changing stop must not reload the icon.
+  const busImage = useImage(BUS_ICON, { maxWidth: 96, maxHeight: 96, tintColor: '#a01d35' });
   const { publish } = useLineHeader();
   const { id, variant } = useLocalSearchParams<{ id: string; variant: string }>();
   const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 30000, true);
@@ -73,10 +78,10 @@ export function RouteTimeline() {
             <View style={s.timelineRow}>
               <View style={s.vehicleLane}>
                 {!!before.length && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.busBefore} contentContainerStyle={s.busTrack}>
-                  {before.map(v => <BusThumbnail key={v.id} vehicle={v} caption={`in arrivo a ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}
+                  {before.map(v => <BusThumbnail key={v.id} vehicle={v} image={busImage} caption={`in arrivo a ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}
                 </ScrollView>}
                 {!!at.length && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.busAt} contentContainerStyle={s.busTrack}>
-                  {at.map(v => <BusThumbnail key={v.id} vehicle={v} caption={`alla fermata ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}
+                  {at.map(v => <BusThumbnail key={v.id} vehicle={v} image={busImage} caption={`alla fermata ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}
                 </ScrollView>}
               </View>
               <View style={s.rail}><View style={[s.line, i === 0 && !before.length && s.invisible]} /><View style={[s.stopDot, i === data.stops.length - 1 && s.lastStop]} /><View style={[s.line, i === data.stops.length - 1 && s.invisible]} /></View>
@@ -126,6 +131,6 @@ const s = StyleSheet.create({
   stopTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stopArrow: { color: '#a01d35', fontSize: 22 },
   busBefore: { position: 'absolute', top: -12, left: 0, right: 0, height: 26 }, busAt: { height: 26, flexGrow: 0, width: '100%' }, busTrack: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   busButton: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },
-  busImage: { width: 22, height: 18, tintColor: '#a01d35' }, busId: { fontSize: 7, lineHeight: 8, color: '#a01d35', maxWidth: 30 },
+  busImage: { width: 22, height: 18 }, busId: { fontSize: 7, lineHeight: 8, color: '#a01d35', maxWidth: 30 },
   vehicleInfo: { borderRadius: 20, margin: 10, padding: 16, gap: 8 }, link: { color: '#a01d35', fontSize: 14, fontWeight: '600' }, close: { fontSize: 28, color: '#a01d35', paddingHorizontal: 10 },
 });
