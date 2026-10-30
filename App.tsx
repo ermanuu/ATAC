@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -45,7 +46,7 @@ export function useData<T>(path: string | null, interval = 0, retainWhileLoading
       controller?.abort(); controller = new AbortController(); const signal = controller.signal;
       if (!retainWhileLoading) setData(null);
       setError(''); setLoading(true);
-      api<T>(path, signal).then(value => { if (!signal.aborted) setData(value); }).catch(e => { if (!signal.aborted) { setData(null); setError(e.message); } })
+      api<T>(path, signal).then(value => { if (!signal.aborted) setData(value); }).catch(e => { if (!signal.aborted) { if (!retainWhileLoading) setData(null); setError(e.message); } })
         .finally(() => { inFlight = false; if (!signal.aborted) setLoading(false); });
     };
     const delay = setTimeout(load, 250);
@@ -84,6 +85,7 @@ export default function App() {
     else router.replace('/stops');
   };
   return <SafeAreaView style={s.safe}><StatusBar style="dark" />
+    {!home && !lineDetail && !stopDetail && <View style={s.fixedHeader}><Pressable accessibilityRole="button" accessibilityLabel="Torna alla home" style={s.headerAction} onPress={() => router.replace('/')}><Text style={s.headerActionText}>← Home</Text></Pressable></View>}
     {!home && !lineDetail && !stopDetail && <View style={s.tabs}>{([['lines', 'Linee'], ['stops', 'Fermate'], ['plan', 'Percorso']] as const).map(([key, label]) => <Pressable accessibilityRole="tab" accessibilityState={{ selected: key === tab }} key={key} onPress={() => router.replace(key === 'lines' ? '/lines' : key === 'stops' ? '/stops' : '/plan')} style={[s.tab, key === tab && s.active]}><Text style={[s.tabText, key === tab && { color: '#a01d35' }]}>{label}</Text></Pressable>)}</View>}
     {(lineDetail || stopDetail) && <View style={s.fixedHeader}>
       <Pressable accessibilityRole="button" accessibilityLabel={lineDetail ? 'Torna a cerca linea' : params.fromRouteId && params.fromVariant ? 'Torna alla linea' : 'Torna a cerca fermata'} style={[s.headerAction, s.headerReturn]} onPress={lineDetail ? returnToSearch : returnFromStop}>
@@ -121,9 +123,38 @@ export function Lines() {
   const { focus, query: initialQuery } = useLocalSearchParams<{ focus?: string; query?: string }>();
   const [query, setQuery] = useState(initialQuery || '');
   const state = useData<Route[]>(`routes?q=${encodeURIComponent(query)}`);
+  const [recent, setRecent] = useState<Route[]>([]);
+  useEffect(() => { let active = true; AsyncStorage.getItem('recent-lines').then(raw => {
+    const value: unknown = JSON.parse(raw || '[]');
+    if (active && Array.isArray(value)) setRecent(value.filter(r => typeof r?.route_id === 'string' && typeof r?.name === 'string').slice(0, 10));
+  }).catch(() => {}); return () => { active = false; }; }, []);
+  const [recentError, setRecentError] = useState('');
+  const [opening, setOpening] = useState(false);
+  const openLine = async (candidate: Route) => {
+    if (opening) return;
+    setRecentError(''); setOpening(true);
+    let route = candidate;
+    try {
+      if (!state.data?.some(r => r.route_id === candidate.route_id)) {
+        const matches = await api<Route[]>(`routes?q=${encodeURIComponent(candidate.name)}`);
+        const current = matches.find(r => r.name === candidate.name);
+        if (!current) throw new Error('Linea non presente negli orari attuali.');
+        route = current;
+      }
+    } catch (error) { setRecentError(error instanceof Error ? error.message : 'Impossibile aprire la linea.'); setOpening(false); return; }
+    const next = [route, ...recent.filter(r => r.name !== route.name)].slice(0, 10);
+    setRecent(next); void AsyncStorage.setItem('recent-lines', JSON.stringify(next)).catch(() => {});
+    setOpening(false); router.push({ pathname: '/line/[id]', params: { id: route.route_id } });
+  };
+  const rank = new Map(recent.map((r, i) => [r.name, i]));
+  const results = [...(state.data || [])];
+  if (!query.trim() && state.data) for (const r of recent) if (!results.some(item => item.name === r.name)) results.push(r);
+  results.sort((a, b) => (rank.get(a.name) ?? 100) - (rank.get(b.name) ?? 100));
   return <View style={s.stack}><TextInput autoFocus={focus === '1'} accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor="#738197" style={s.input} autoCorrect={false} /><RequestState state={state} />
     {state.data?.length === 0 && <Notice text="Nessuna linea trovata." />}
-    {state.data?.map(r => <Pressable accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => router.push({ pathname: '/line/[id]', params: { id: r.route_id } })}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>{r.description || `Linea ${r.name}`}</Text><Text style={s.small}>Scegli la direzione →</Text></View><Text style={s.arrow}>›</Text></Pressable>)}
+    {!!recentError && <Notice text={recentError} />}
+    {opening && <ActivityIndicator color="#a01d35" />}
+    {results.map(r => <Pressable disabled={opening} accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => openLine(r)}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>{r.description || `Linea ${r.name}`}</Text><Text style={s.small}>Scegli la direzione →</Text></View><Text style={s.arrow}>›</Text></Pressable>)}
   </View>;
 }
 export function Stops() {

@@ -98,10 +98,35 @@ Arresta backend ed Expo con Ctrl+C nelle rispettive finestre. Scarica dal browse
 
 Riavvia il backend nella prima finestra con `set API_HOST=0.0.0.0` e `npm run api`. Nella seconda mantieni `EXPO_PUBLIC_API_URL` con l’indirizzo del PC e avvia `npm start -- --clear --lan`, poi scansiona il nuovo QR. Occorre aggiornare sia il backend sia l’app: il nuovo elenco di direzioni usa l’API aggiornata.
 
-Le posizioni dei bus vengono rilette ogni 15 secondi e le icone delle misure più vecchie di 90 secondi vengono rimosse. Nel dettaglio del bus è visibile il timestamp con i secondi. Se il GPS contraddice la vecchia fermata, l’app può aggiornare la collocazione in modo approssimato (≈); se la fonte ripete le stesse coordinate, non viene simulato uno spostamento. Per queste modifiche aggiornare anche `server`, oltre a `App.tsx` e all’intera cartella `src`.
+Le posizioni dei bus vengono rilette ogni 15 secondi e le misure più vecchie di 90 secondi vengono indicate in grigio come ultima posizione nota; tutte scadono dopo 180 secondi. Le vetture omesse da un aggiornamento vengono conservate per un massimo di 45 secondi dall’ultima presenza, mantenendo il timestamp originale. Nel dettaglio del bus è visibile il timestamp con i secondi. Se il GPS contraddice la vecchia fermata, l’app può aggiornare la collocazione in modo approssimato (≈); se la fonte ripete le stesse coordinate, non viene simulato uno spostamento. Per queste modifiche aggiornare anche `server`, oltre a `App.tsx` e all’intera cartella `src`.
 
 Se una riga degli arrivi non apriva l’itinerario, aggiorna `App.tsx` e tutta `src`: il nuovo client gestisce anche le risposte del vecchio servizio. Per vedere i numeri vettura disponibili occorre aggiornare anche tutta `server` e riavviare il backend: `http://IP-DEL-PC:8000/api/status` deve contenere `"apiVersion": 2`. Il campo “vettura non disponibile” significa che il servizio non ha fornito un’identificazione utilizzabile; non è un numero da stimare.
 
 ## Aggiornamento del logo e dell’avvio
 
 Dallo ZIP GitHub aggiornato copia `App.tsx`, tutta `assets`, `app.json`, `package.json` e `package-lock.json` nella cartella del progetto. Arresta Expo con Ctrl+C, esegui `npm ci`, poi `npm start -- --clear --lan` mantenendo la variabile del backend. Il logo è visibile sotto ROMA · AUTOBUS nella home e nella breve vista di caricamento JS. In Expo Go la schermata nativa può mostrare l’icona dell’app: lo splash completo configurato sarà verificabile in una build release. Questo aggiornamento non richiede modifiche ai dati degli autobus.
+
+
+## Aggiornare home, direzioni e linee recenti
+
+1. Ferma backend ed Expo con Ctrl+C nelle due finestre.
+2. Scarica [lo ZIP di main](https://github.com/ermanuu/ATAC/archive/refs/heads/main.zip) dal browser con accesso a GitHub ed estrailo in una cartella separata.
+3. Copia in `C:\ATAC` i file `App.tsx`, `package.json`, `package-lock.json`, tutta `src` e i file di `server` (incluso il nuovo `positions.py`). Unisci le cartelle e sostituisci i file. **Conserva `server\data`, `.venv` e `.env`**: non eliminare la cartella del progetto. Non occorre reimportare gli orari.
+4. Esegui `npm ci` dentro `C:\ATAC`: aggiunge la memoria persistente delle ultime dieci linee aperte, compatibile con Expo Go SDK 58.
+5. Prima finestra:
+
+```bat
+cd /d C:\ATAC
+set API_HOST=0.0.0.0
+npm run api
+```
+
+6. Seconda finestra: sostituisci l’IP di esempio con l’IPv4 del tuo PC (`ipconfig`).
+
+```bat
+cd /d C:\ATAC
+set EXPO_PUBLIC_API_URL=http://192.168.1.20:8000
+npm start -- --clear --lan
+```
+
+Apri il nuovo QR in Expo Go. Nelle tre categorie trovi Home in alto a sinistra. Dopo aver aperto una linea, questa comparirà per prima nelle ricerche compatibili, anche dopo la chiusura dell’app. Le direzioni proposte hanno corse programmate già in viaggio o in partenza entro un’ora, secondo il calendario GTFS. Le partenze restano nella finestra da −10 a +60 minuti.

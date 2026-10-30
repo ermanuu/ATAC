@@ -46,7 +46,7 @@ class TransitTests(unittest.TestCase):
     def test_import_and_search(self):
         self.assertEqual(t.routes("64")[0]["route_id"], "r1")
         self.assertEqual(t.stops("Origine")[0]["stop_id"], "a")
-        self.assertEqual(len(t.route_detail("r1")["variants"]), 2)
+        self.assertEqual(len(t.route_detail("r1", now=self.now)["variants"]), 1)
 
     def test_route_with_transfer_and_nonconsecutive_sequences(self):
         result = t.plan("a", "c", self.now)

@@ -21,7 +21,7 @@ def patterns(db, route_id, now):
     trips = {r['trip_id']: dict(r) for r in db.execute(
         'SELECT * FROM trips WHERE route_id=? ORDER BY trip_id', (route_id,)) if r['service_id'] in services}
     sequences = defaultdict(list)
-    for row in db.execute('''SELECT ti.trip_id,ti.sequence,ti.departure,ti.pickup,s.* FROM times ti
+    for row in db.execute('''SELECT ti.trip_id,ti.sequence,ti.arrival,ti.departure,ti.pickup,s.* FROM times ti
                             JOIN trips tr ON tr.trip_id=ti.trip_id JOIN stops s ON s.stop_id=ti.stop_id
                             WHERE tr.route_id=? ORDER BY ti.trip_id,ti.sequence''', (route_id,)):
         if row['trip_id'] in trips:
@@ -133,7 +133,7 @@ def gps_segment(lat, lon, stops, preferred=None):
 def place_vehicles(group, groups, sequences, now, live):
     stops = [{k: v for k, v in s.items() if k not in ('trip_id', 'departure', 'pickup')} |
              {'vehiclesAt': [], 'vehiclesBefore': []} for s in group['stops']]
-    if not live['available']:
+    if not live.get('feed'):
         return stops, 0
     unplaced = 0
     selected_ids = tuple(s['stop_id'] for s in stops)
@@ -142,7 +142,7 @@ def place_vehicles(group, groups, sequences, now, live):
             continue
         vehicle = entity.vehicle
         timestamp = int(vehicle.timestamp or live['timestamp'])
-        if not 0 <= now - timestamp <= 90:
+        if not 0 <= now - timestamp <= 180:
             continue
         if vehicle.trip.HasField('direction_id') and group['direction'] and str(vehicle.trip.direction_id) != group['direction']:
             continue
@@ -211,7 +211,8 @@ def place_vehicles(group, groups, sequences, now, live):
         item = {'id': vehicle.vehicle.id or entity.id, 'timestamp': timestamp,
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
                 'estimated': estimated, 'placement': placement,
-                'timestampSource': 'vehicle' if vehicle.timestamp else 'feed',
+                'retained': entity.id in live.get('retained', ()) or now - timestamp > 90 or not live['available'],
+                'timestampSource': 'vehicle' if vehicle.timestamp and entity.id not in live.get('feedTimestamps', ()) else 'feed',
                 'lat': vehicle.position.latitude if vehicle.HasField('position') else None,
                 'lon': vehicle.position.longitude if vehicle.HasField('position') else None}
         stops[index]['vehiclesAt' if placement == 'at' else 'vehiclesBefore'].append(item)
@@ -226,7 +227,12 @@ def line_detail(route_id, variant=None, now=None):
         if not route:
             raise ValueError('Linea autobus non trovata')
         groups, sequences, windows = patterns(db, route_id, now)
-        result = {'route': dict(route), 'variants': [summary(g) for g in groups]}
+        active_groups = [g for g in groups if any(
+            trip['service_id'] in active and
+            epoch + sequences[trip_id][0]['departure'] <= now + 3600 and
+            epoch + sequences[trip_id][-1]['arrival'] >= now
+            for epoch, active in windows for trip_id, trip in g['trips'].items())]
+        result = {'route': dict(route), 'variants': [summary(g) for g in active_groups]}
     if not variant:
         # The direction picker needs no realtime requests, vehicle list or stop list.
         return result

@@ -147,6 +147,8 @@ class Realtime:
     def __init__(self):
         self.lock = threading.Lock()
         self.cache = {}
+        from .positions import PositionHistory
+        self.positions = PositionHistory()
 
     def read(self, kind):
         with self.lock:
@@ -168,6 +170,9 @@ class Realtime:
                 result = {"available": True, "timestamp": timestamp, "feed": feed}
             except Exception as exc:
                 result = {"available": False, "timestamp": None, "error": str(exc), "feed": None}
+            if kind == "vehicles":
+                merged, retained, feed_timestamps = self.positions.merge(result['feed'], now)
+                result.update(feed=merged, retained=retained, feedTimestamps=feed_timestamps)
             self.cache[kind] = (now, result)
             return result
 

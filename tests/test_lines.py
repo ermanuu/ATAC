@@ -62,11 +62,27 @@ class LineTests(unittest.TestCase):
 
     def test_direction_picker_does_not_request_vehicles(self):
         result = t.route_detail('r1', now=self.now)
-        self.assertEqual(len(result['variants']), 2)
+        self.assertEqual(len(result['variants']), 1)
         self.assertNotIn('departures', result)
         self.assertNotIn('vehicles', result)
         self.read.assert_not_called()
         self.assertEqual(result['variants'][0]['fromName'], 'Origine')
+
+    def test_picker_excludes_finished_and_later_variants(self):
+        self.add_trip('school', 8*3600, headsign='Scuola')
+        self.add_trip('deviation', 12*3600, headsign='Deviata')
+        self.add_trip('running', 9*3600+55*60, headsign='In viaggio')
+        self.add_trip('next', 11*3600, headsign='Prossima')
+        names = {v['headsign'] for v in t.route_detail('r1', now=self.now)['variants']}
+        self.assertEqual(names, {'Cambio', 'In viaggio', 'Prossima'})
+
+    def test_picker_obeys_service_exception(self):
+        now = int(datetime(2026, 10, 31, 10, 0, tzinfo=t.ROME).timestamp())
+        self.assertEqual(t.route_detail('r1', now=now)['variants'], [])
+
+    def test_old_position_is_marked_as_last_known(self):
+        self.vehicle(self.feed('vehicles'), 'old', sequence=10, timestamp=self.now-91)
+        self.assertTrue(self.board()['stops'][0]['vehiclesAt'][0]['retained'])
 
     def test_departure_window_includes_exact_bounds(self):
         for name, at in [('too_early', 35399), ('start',35400), ('recent',35940), ('end',39600), ('too_late',39601)]:
@@ -197,10 +213,10 @@ class LineTests(unittest.TestCase):
         self.assertFalse(board['stops'][1]['vehiclesBefore'])
         self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['id'],'passed')
 
-    def test_vehicle_icon_expires_after_ninety_seconds(self):
+    def test_vehicle_icon_expires_after_three_minutes(self):
         feed=self.feed('vehicles')
-        self.vehicle(feed,'expired',sequence=10,timestamp=self.now-91)
-        self.vehicle(feed,'boundary',sequence=10,timestamp=self.now-90)
+        self.vehicle(feed,'expired',sequence=10,timestamp=self.now-181)
+        self.vehicle(feed,'boundary',sequence=10,timestamp=self.now-180)
         self.assertEqual([v['id'] for v in self.board()['stops'][0]['vehiclesAt']],['boundary'])
 
     def test_feed_updated_during_download_is_not_discarded_as_future(self):
