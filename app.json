@@ -19,7 +19,8 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/atac-app-icon.png",
+      "output": "single"
     },
     "scheme": "romabus",
     "plugins": [

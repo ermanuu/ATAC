@@ -93,3 +93,9 @@ Il logo fornito dall’utente è stato preparato come asset locale in `assets/at
 
 
 L’immagine del bus viene decodificata una sola volta per itinerario, con limite 96×96 pixel, e condivisa come `ImageRef` fra tutte le miniature. Il cambio di riga usa la bitmap già pronta, con placeholder identico e transizione a zero, per evitare un nuovo caricamento visibile. La cache dell’immagine è indipendente dalla validità delle posizioni del feed. `expo-image` è incluso in Expo Go SDK 58.
+
+## Versione web installabile sul PC di casa
+
+La stessa app può funzionare senza Expo Go: `npm run build:web`, poi
+`avvia-web-windows.cmd` su Windows. Sito e API sono serviti insieme sulla porta 8000.
+La guida completa per Safari, icona sulla Home e rete domestica è in [WEB-WINDOWS.md](WEB-WINDOWS.md).

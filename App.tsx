@@ -7,7 +7,7 @@ import { NavIcon } from './src/ui/NavIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
@@ -20,7 +20,7 @@ type Health = { vehicles: { available: boolean }; updates: { available: boolean 
 type Arrivals = { apiVersion?: number; arrivals: Arrival[]; liveAvailable: boolean; timestamp: number | null };
 type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
 export async function api<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
-  if (!API) throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
+  if (!API && Platform.OS !== 'web') throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
   const response = await fetch(`${API}/api/${path}${force ? `${path.includes('?') ? '&' : '?'}fresh=1` : ''}`, { signal });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Servizio non disponibile');
