@@ -6,7 +6,9 @@ Per provarla gratuitamente da Windows su iPhone, segui [la guida passo passo](PR
 
 ## Funzionalità
 
-La home conserva l’intestazione originale ROMA · AUTOBUS, titolo e sottotitolo, seguiti dai pulsanti **Cerca linea**, **Cerca fermata** e **Calcola percorso**. Le ricerche hanno le schede Linee/Fermate/Percorso; nei dettagli le schede scompaiono e il pulsante di ritorno resta fisso in alto a sinistra. Le partenze sono una riga orizzontale compatta e le fermate si aprono con la freccia accanto al nome.
+La home mostra il logo ATAC aggiornato con ROMA · AUTOBUS sotto, titolo, sottotitolo e tre pulsanti: **Cerca linea**, **Cerca fermata**, **Calcola percorso**. Fuori dalla home una barra flottante inferiore permette di passare fra Linee/Fermate/Percorso, anche nei dettagli di linee e fermate. I ritorni restano in alto a sinistra. Le partenze sono una riga orizzontale compatta e le fermate si aprono con la freccia accanto al nome.
+
+Lo stile usa superfici traslucide, sfocatura, bordi luminosi e sfondo sfumato. I controlli flottanti usano `expo-glass-effect` con Liquid Glass nativo quando entrambe le verifiche API/runtime confermano la compatibilità (iOS 26+); altrove usano `expo-blur`. Con “Riduci trasparenza” di iOS le superfici diventano opache. I tre moduli Expo aggiunti sono inclusi in Expo Go SDK 58. L’effetto nativo e le impostazioni di accessibilità vanno verificati su iPhone: il controllo in browser verifica il fallback.
 
 - Ritorno fisso alla home in alto a sinistra nelle tre categorie. Le ultime dieci linee aperte vengono salvate sul dispositivo e mostrate per prime nei risultati compatibili con la ricerca.
 - Ricerca delle linee autobus, scelta della direzione e delle varianti di percorso, partenze dal capolinea da 10 minuti fa a un’ora avanti ed elenco delle fermate.
@@ -78,4 +80,4 @@ I feed live vengono letti su richiesta: cache di 10 secondi per le posizioni e 3
 
 Gli arrivi restano apribili anche con un backend precedente che non fornisce routeId/variantId: il client risolve linea e direzione dai dati disponibili, oppure apre una scelta esplicita. Se il numero vettura non è fornito dal servizio viene indicato come non disponibile, invece di nascondere il campo. La risposta `/api/status` e quella degli arrivi includono `apiVersion: 2` nel backend aggiornato. Verifica del fallback client: `npm run test:client`.
 
-Il logo fornito dall’utente è stato preparato come asset locale in `assets/atac-logo.png`, con una versione quadrata per l’icona (`assets/atac-app-icon.png`). Compare sotto ROMA · AUTOBUS nella home, nella vista JS iniziale durante il caricamento dell’immagine e nello splash nativo configurato con expo-splash-screen. Non richiede download esterni all’avvio. Expo Go può mostrare l’icona al posto dello splash nativo: l’aspetto finale dello splash richiede una build release per la verifica.
+Il logo fornito dall’utente è stato preparato come asset locale in `assets/atac-logo.png`, con sfondo trasparente e una versione quadrata bianca per l’icona (`assets/atac-app-icon.png`). Compare sopra ROMA · AUTOBUS nella home, nella vista JS iniziale durante il caricamento dell’immagine e nello splash nativo configurato con expo-splash-screen. Non richiede download esterni all’avvio. Expo Go può mostrare l’icona al posto dello splash nativo: l’aspetto finale dello splash richiede una build release per la verifica.

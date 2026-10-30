@@ -130,3 +130,17 @@ npm start -- --clear --lan
 ```
 
 Apri il nuovo QR in Expo Go. Nelle tre categorie trovi Home in alto a sinistra. Dopo aver aperto una linea, questa comparirà per prima nelle ricerche compatibili, anche dopo la chiusura dell’app. Le direzioni proposte hanno corse programmate già in viaggio o in partenza entro un’ora, secondo il calendario GTFS. Le partenze restano nella finestra da −10 a +60 minuti.
+
+
+## Aggiornare logo, barra inferiore e stile Liquid Glass
+
+Arresta Expo con Ctrl+C. Dal nuovo ZIP di `main` copia in `C:\ATAC` `App.tsx`, tutta `src` (inclusa la nuova cartella `ui`), tutta `assets`, `package.json` e `package-lock.json`. Mantieni `server\data`, `.venv` e `.env`.
+
+Dentro `C:\ATAC` esegui:
+
+```bat
+npm ci
+npm start -- --clear --lan
+```
+
+Mantieni `EXPO_PUBLIC_API_URL` impostato all’IP del PC e il backend aperto nell’altra finestra. Questo aggiornamento grafico non richiede una nuova importazione degli orari né modifiche al backend. La barra inferiore compare in tutte le schermate fuori dalla home. Liquid Glass nativo richiede un iPhone e un runtime compatibili (iOS 26+); sugli altri sistemi viene usato il vetro sfocato. Se hai attivato “Riduci trasparenza” nelle impostazioni Accessibilità di iOS, le superfici sono opache.
