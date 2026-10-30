@@ -88,8 +88,8 @@ export function RouteTimeline() {
             <View style={s.timelineRow}>
               <View style={s.vehicleLane}>{at.map((v,j) => <BusThumbnail key={`${v.id}-${j}`} vehicle={v} caption={`alla fermata ${stop.name}`} onPress={() => setVehicleInfo({ id: v.id, stopName: stop.name })} />)}</View>
               <View style={s.rail}><View style={[s.line, i === 0 && !before.length && s.invisible]} /><View style={[s.stopDot, i === data.stops.length - 1 && s.lastStop]} /><View style={[s.line, i === data.stops.length - 1 && s.invisible]} /></View>
-              <Pressable accessibilityRole="button" accessibilityLabel={`Fermata ${stop.name}, codice ${stop.stop_id}, mostra arrivi`} style={s.stopName} onPress={() => router.push({ pathname: '/stops', params: { stopId: stop.stop_id, stopName: stop.name } })}>
-                <Text style={s.stopText}>{stop.name}</Text><Text style={s.small}>{i === 0 ? 'Capolinea di partenza · ' : i === data.stops.length - 1 ? 'Capolinea di arrivo · ' : ''}{stop.stop_id}</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Fermata ${stop.name}, codice ${stop.stop_id}, mostra arrivi`} style={s.stopName} onPress={() => router.push({ pathname: '/stops', params: { stopId: stop.stop_id, stopName: stop.name, fromRouteId: id, fromVariant: variant, fromLine: data.route.name } })}>
+                <Text style={s.stopText}>{stop.name}</Text><Text style={s.small}>{i === 0 ? 'Capolinea di partenza · ' : i === data.stops.length - 1 ? 'Capolinea di arrivo · ' : ''}{stop.stop_id}</Text><Text style={s.link}>Tutti gli autobus in arrivo ›</Text>
               </Pressable>
             </View>
           </View>;

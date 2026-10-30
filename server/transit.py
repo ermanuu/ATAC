@@ -206,9 +206,9 @@ def arrivals(stop_id):
     scheduled = []
     with connect() as db:
         for epoch, active in service_windows(db, now, 7200):
-            for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.departure BETWEEN ? AND ? AND r.type=3 AND t.pickup!=1 ORDER BY t.departure", (stop_id, now-1800-epoch, now+7200-epoch)):
+            for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
-                    scheduled.append({"tripId": r["trip_id"], "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["departure"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
+                    scheduled.append({"tripId": r["trip_id"], "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
     live = realtime.read("updates")
     if live["available"]:
         by_trip = {}
@@ -228,14 +228,14 @@ def arrivals(stop_id):
                     continue
                 skipped = False
                 for event in update.stop_time_update:
-                    if event.stop_id != stop_id and not (not event.stop_id and event.HasField("stop_sequence") and event.stop_sequence == item["stopSequence"]):
+                    if (event.stop_sequence != item["stopSequence"] if event.HasField("stop_sequence") else event.stop_id != stop_id):
                         continue
                     if event.schedule_relationship == gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.SKIPPED:
                         skipped = True
                         break
                     if event.schedule_relationship == gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.NO_DATA:
                         break
-                    for field in ("departure", "arrival"):
+                    for field in ("arrival", "departure"):
                         if event.HasField(field):
                             prediction = getattr(event, field)
                             if prediction.HasField("time"):
@@ -249,7 +249,7 @@ def arrivals(stop_id):
                     continue
             keep.append(item)
         scheduled = keep
-    return {"arrivals": sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])[:20],
+    return {"arrivals": sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"]),
             "liveAvailable": live["available"], "timestamp": live["timestamp"]}
 
 

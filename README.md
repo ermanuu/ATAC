@@ -8,7 +8,7 @@ Per provarla gratuitamente da Windows su iPhone, segui [la guida passo passo](PR
 
 - Ricerca delle linee autobus, scelta della direzione e delle varianti di percorso, partenze dal capolinea da 10 minuti fa a un’ora avanti ed elenco delle fermate.
 - Miniature dei bus a sinistra delle fermate: alla fermata se fermi, nel tratto precedente se in arrivo. Posizioni dal feed GTFS Realtime, dettaglio veicolo e apertura in Mappe di Apple; eventuali associazioni GPS approssimate sono marcate con ≈.
-- Ricerca fermate e prossime partenze: previsioni live quando presenti, altrimenti orari esplicitamente programmati. Corse cancellate e fermate saltate vengono escluse.
+- Tocco su una fermata del percorso per tutti gli autobus in arrivo di tutte le linee nelle prossime due ore, senza limite di 20 risultati. La vista mostra minuti d’attesa, orari, aggiornamento automatico/manuale e ritorno alla direzione selezionata. Previsioni live quando presenti, altrimenti orari esplicitamente programmati; corse cancellate e fermate saltate vengono escluse.
 - Calcolo dell’itinerario fra due fermate usando orari GTFS e calendario effettivo, con cambi e corse oltre mezzanotte.
 - Nessun dato dimostrativo nell’app. Feed indisponibili o scaduti producono stati espliciti, senza simulare il servizio.
 

@@ -67,7 +67,7 @@ Mantieni entrambe le finestre aperte durante la prova. `localhost` e `127.0.0.1`
 ## 6. Cosa provare
 
 - **Linee**: cerca una linea, scegli la direzione e consulta le partenze dal capolinea (−10 / +60 minuti). Nell’elenco fermate, le miniature a sinistra indicano i bus fermi o in arrivo; toccale per i dettagli, oppure tocca una fermata per gli arrivi.
-- **Fermate**: cerca una fermata; distingue le previsioni live dagli orari programmati.
+- **Fermate**: cerca una fermata oppure tocca “Tutti gli autobus in arrivo” sotto una fermata del percorso. Mostra tutti gli arrivi disponibili di tutte le linee nelle prossime due ore, con attesa e orario. Usa “Aggiorna arrivi” per ricaricare e “Torna alla linea” per riprendere la direzione selezionata.
 - **Percorso**: seleziona due fermate e calcola un itinerario solo autobus. Il calcolo usa gli orari programmati, non il traffico live.
 
 Se i feed live non sono raggiungibili, l’app lo indica; senza GTFS importato le ricerche non sono disponibili. Aggiorna gli orari con `npm run data:import` prima della prova o almeno ogni giorno.

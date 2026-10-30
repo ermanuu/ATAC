@@ -9,7 +9,7 @@ export type Stop = { stop_id: string; name: string };
 export type Route = { route_id: string; name: string; description: string };
 type Live = { available: boolean; timestamp: number | null };
 type Health = { staticAvailable: boolean; serviceToday?: boolean; vehicles: Live; updates: Live };
-type Arrivals = { arrivals: { tripId: string; line: string; headsign: string; time: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
+type Arrivals = { arrivals: { tripId: string; line: string; headsign: string; time: number; scheduledTime?: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
 type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
 async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   if (!API) throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
@@ -89,19 +89,40 @@ export function Lines() {
   </View>;
 }
 export function Stops() {
-  const params = useLocalSearchParams<{ stopId?: string; stopName?: string }>();
+  const params = useLocalSearchParams<{ stopId?: string; stopName?: string; fromRouteId?: string; fromVariant?: string; fromLine?: string }>();
   const [stop, setStop] = useState<Stop | null>(() => params.stopId && params.stopName ? { stop_id: params.stopId, name: params.stopName } : null);
   useEffect(() => {
     if (params.stopId && params.stopName) setStop({ stop_id: params.stopId, name: params.stopName });
   }, [params.stopId, params.stopName]);
-  const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 30000);
-  return <View style={s.stack}><Text style={s.heading}>Alla fermata</Text><Text style={s.muted}>Arrivi previsti e orari programmati</Text><StopSearch label="Fermata" selected={stop} onSelect={setStop} /><RequestState state={state} />
-    {state.data && <><Text style={s.muted}>{state.data.liveAvailable ? stamp(state.data.timestamp) : 'Feed live non disponibile · solo orari programmati'}</Text>
-      {!state.data.arrivals.length && <Notice text="Nessuna partenza nelle prossime 2 ore nel feed disponibile." />}
-      {state.data.arrivals.map((a,i) => <View key={`${a.tripId}-${i}`} style={s.route}><Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? '● Previsione live' : 'Orario programmato'}</Text></View><Text style={s.time}>{clock(a.time)}</Text></View>)}
+  const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 30000, true);
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
+    return () => clearInterval(timer);
+  }, []);
+  const fromLine = Boolean(params.fromRouteId && params.fromVariant);
+  const liveFresh = Boolean(state.data?.liveAvailable && state.data.timestamp && now - state.data.timestamp <= 180);
+  const arrivals = (state.data?.arrivals || []).map(a => a.kind === 'live' && !liveFresh
+    ? { ...a, time: a.scheduledTime || 0, kind: 'scheduled' } : a).filter(a => a.time >= now && a.time <= now + 7200);
+  return <View style={s.stack}>
+    {fromLine && <Button text={`‹ Torna alla linea ${params.fromLine || ''}`} onPress={() => router.replace({ pathname: '/line/[id]/[variant]', params: { id: params.fromRouteId!, variant: params.fromVariant! } })} />}
+    <Text style={s.heading}>Autobus in arrivo</Text>
+    <Text style={s.muted}>Tutte le linee · prossime 2 ore · aggiornamento ogni 30 s</Text>
+    {fromLine && stop ? <View style={s.card}><Text style={s.heading}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></View> : <StopSearch label="Fermata" selected={stop} onSelect={setStop} />}
+    <RequestState state={state} />
+    {stop && <Button text="Aggiorna arrivi" onPress={state.retry} disabled={state.loading} />}
+    {state.data && <>
+      <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
+      <Text style={s.label}>{arrivals.length} {arrivals.length === 1 ? 'arrivo disponibile' : 'arrivi disponibili'} per questa fermata</Text>
+      {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
+      {arrivals.map((a,i) => <View key={`${a.tripId}-${i}`} style={s.route}>
+        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? '● Previsione live' : 'Orario programmato'}</Text></View>
+        <View style={s.arrivalTime}><Text style={s.time}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={s.small}>{clock(a.time)}</Text></View>
+      </View>)}
     </>}
   </View>;
 }
+
 export function Planner() {
   const [origin, setOrigin] = useState<Stop | null>(null);
   const [destination, setDestination] = useState<Stop | null>(null);
@@ -140,6 +161,7 @@ const s = StyleSheet.create({
   route: { paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#e3dfd8', flexDirection: 'row', gap: 14, alignItems: 'center' },
   badge: { minWidth: 52, borderRadius: 12, padding: 12, backgroundColor: '#a01d35', alignItems: 'center' }, badgeText: { color: '#fff', fontSize: 18, fontWeight: '800' },
   arrow: { fontSize: 28, color: '#a01d35' }, time: { fontSize: 20, fontWeight: '700', color: '#202d3a' },
+  arrivalTime: { alignItems: 'flex-end', gap: 4 },
   button: { backgroundColor: '#a01d35', padding: 16, borderRadius: 14, alignItems: 'center' }, buttonText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   notice: { backgroundColor: '#eee9df', padding: 14, borderRadius: 12, marginVertical: 8 }, card: { backgroundColor: '#fff', borderRadius: 18, padding: 18, gap: 12, borderColor: '#e4dfd8', borderWidth: 1 },
   label: { color: '#202d3a', fontSize: 13, fontWeight: '700' }, stop: { padding: 14, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee9df' },
