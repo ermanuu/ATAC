@@ -130,7 +130,8 @@ def gps_segment(lat, lon, stops, preferred=None):
     return best
 
 
-def place_vehicles(group, groups, sequences, now, live):
+def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()):
+    from .progress import next_arrival
     stops = [{k: v for k, v in s.items() if k not in ('trip_id', 'departure', 'pickup')} |
              {'vehiclesAt': [], 'vehiclesBefore': []} for s in group['stops']]
     if not live.get('feed'):
@@ -168,12 +169,18 @@ def place_vehicles(group, groups, sequences, now, live):
         index = None
         estimated = False
         actual_stops = sequences.get(trip_id)
+        sequence_index = None
         if actual_stops and vehicle.HasField('current_stop_sequence'):
-            index = next((i for i, s in enumerate(actual_stops) if s['sequence'] == vehicle.current_stop_sequence), None)
-        if index is None and vehicle.stop_id:
-            matches = [i for i, stop_id in enumerate(selected_ids) if stop_id == vehicle.stop_id]
-            if len(matches) == 1:
-                index = matches[0]
+            sequence_index = next((i for i, s in enumerate(actual_stops) if s['sequence'] == vehicle.current_stop_sequence), None)
+        matches = [i for i, stop_id in enumerate(selected_ids) if vehicle.stop_id and stop_id == vehicle.stop_id]
+        # stop_id names the stop; a sequence counter can be stale or use another
+        # numbering convention. On loops, use sequence only to disambiguate it.
+        if len(matches) == 1:
+            index = matches[0]
+        elif sequence_index is not None and (not vehicle.stop_id or sequence_index in matches):
+            index = sequence_index
+        source = 'stop_id' if index is not None and matches else 'stop_sequence'
+        reference_index = index
         placement_override = None
         if vehicle.HasField('position'):
             lat, lon = vehicle.position.latitude, vehicle.position.longitude
@@ -182,9 +189,9 @@ def place_vehicles(group, groups, sequences, now, live):
                 stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
                 # A stale stop_sequence must not pin a bus to a stop it has passed.
                 inconsistent = index is None or (stopped and stop_distance(lat, lon, stops[index]) > 100)
-                if projected is not None and index is not None and not stopped and projected[1] != index:
+                if projected is not None and index is not None and not stopped and projected[1] > index:
                     inconsistent = True
-                if projected is not None and inconsistent:
+                if projected is not None and inconsistent and (index is None or projected[1] > index):
                     _, end, fraction = projected
                     if fraction >= 0.95 and stop_distance(lat, lon, stops[end]) <= 50:
                         index, placement_override = end, 'at'
@@ -193,7 +200,8 @@ def place_vehicles(group, groups, sequences, now, live):
                     else:
                         index, placement_override = end, 'before'
                     estimated = True
-                elif inconsistent and stopped and index is not None and stop_distance(lat, lon, stops[index]) > 500:
+                    source = 'gps'
+                elif projected is None and inconsistent and stopped and index is not None and stop_distance(lat, lon, stops[index]) > 500:
                     # GPS far off the route contradicts the stop reference: do not pin it there.
                     index = None
         if index is None and vehicle.HasField('position'):
@@ -203,6 +211,13 @@ def place_vehicles(group, groups, sequences, now, live):
             if distances[nearest] <= 500 and selected_ids.count(selected_ids[nearest]) == 1:
                 index = nearest
                 estimated = True
+                source = 'gps'
+        forecast = next_arrival(vehicle, group['trips'].get(trip_id), actual_stops or [], reference_index, timestamp, now, updates, windows)
+        prediction_timestamp = None
+        if forecast and (index is None or forecast[0] > index):
+            index, prediction_timestamp = forecast
+            placement_override, source = 'before', 'predictions'
+            estimated = True
         if index is None:
             unplaced += 1
             continue
@@ -210,7 +225,8 @@ def place_vehicles(group, groups, sequences, now, live):
         placement = placement_override or ('at' if stopped or estimated else 'before')
         item = {'id': vehicle.vehicle.id or entity.id, 'vehicleId': vehicle.vehicle.label.strip() or None, 'timestamp': timestamp,
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
-                'estimated': estimated, 'placement': placement,
+                'estimated': estimated, 'placement': placement, 'positionSource': source,
+                'predictionTimestamp': prediction_timestamp, 'referenceStopId': vehicle.stop_id or None,
                 'retained': entity.id in live.get('retained', ()) or now - timestamp > 90 or not live['available'],
                 'timestampSource': 'vehicle' if vehicle.timestamp and entity.id not in live.get('feedTimestamps', ()) else 'feed',
                 'lat': vehicle.position.latitude if vehicle.HasField('position') else None,
@@ -244,7 +260,7 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
     if use_current_clock:
         # Fetching may take seconds: evaluate freshness after the feed arrives.
         now = int(time.time())
-    positioned_stops, unplaced = place_vehicles(selected, groups, sequences, now, vehicles)
+    positioned_stops, unplaced = place_vehicles(selected, groups, sequences, now, vehicles, updates, windows)
     result.update(selectedVariant=summary(selected), stops=positioned_stops,
                   departures=terminal_departures(selected, sequences, windows, now, updates),
                   window={'from': now - 600, 'to': now + 3600},

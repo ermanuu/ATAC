@@ -1,11 +1,12 @@
+import { useLineHeader } from '../lib/LineHeader';
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import React, { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
 
 type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
-type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; estimated: boolean; retained?: boolean; timestampSource?: string; lat: number | null; lon: number | null };
+type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
 type Stop = { stop_id: string; name: string; sequence: number; vehiclesAt: Vehicle[]; vehiclesBefore: Vehicle[] };
 type Directions = { route: Route; variants: Variant[] };
 type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: { tripId: string; serviceDate: string; time: number; scheduledTime: number; kind: string }[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
@@ -28,11 +29,8 @@ export function RouteDirections() {
 }
 
 function BusThumbnail({ vehicle, caption, onPress }: { vehicle: Vehicle; caption: string; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.retained ? ', ultima posizione nota' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
-    <View style={[s.busBody, vehicle.estimated && s.estimatedBus]}>
-      <View style={s.busWindows}><View style={s.busWindow} /><View style={s.busWindow} /><View style={s.busDoor} /><View style={s.busFront} /></View>
-      <View style={s.wheels}><View style={s.wheel} /><View style={s.wheel} /></View>
-    </View>
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.positionSource === 'predictions' ? ', prossima fermata da previsioni live' : vehicle.retained ? ', ultima posizione nota' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
+    <Image source={require('../../assets/bus-front.png')} accessibilityIgnoresInvertColors resizeMode="contain" style={s.busImage} />
     <Text numberOfLines={1} style={s.busId}>{vehicle.vehicleId || '—'}</Text>
   </Pressable>;
 }
@@ -40,6 +38,7 @@ function BusThumbnail({ vehicle, caption, onPress }: { vehicle: Vehicle; caption
 const positionStamp = (timestamp: number | null) => timestamp ? `Posizioni alle ${new Date(timestamp * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Nessun aggiornamento';
 const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 90 && !vehicle.retained;
 export function RouteTimeline() {
+  const { publish } = useLineHeader();
   const { id, variant } = useLocalSearchParams<{ id: string; variant: string }>();
   const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 30000, true);
   const [vehicleInfo, setVehicleInfo] = useState<{ id: string; stopName: string } | null>(null);
@@ -50,13 +49,13 @@ export function RouteTimeline() {
   }, []);
   const now = Math.max(tick, state.receivedAt);
   const data = state.data;
+  useEffect(() => { if (data) publish({ routeId: id, variant, line: data.route.name, direction: data.selectedVariant.headsign }); }, [data, id, variant, publish]);
   const departures = data?.departures.filter(d => now - 600 <= d.time && d.time <= now + 3600) || [];
   const selected = data?.stops.flatMap(stop => [...stop.vehiclesAt, ...stop.vehiclesBefore]).find(v => v.id === vehicleInfo?.id && fresh(v, now) && !state.error);
   const vehicleCount = data?.stops.reduce((total, stop) => total + [...stop.vehiclesAt, ...stop.vehiclesBefore].filter(v => fresh(v, now) && !state.error).length, 0) || 0;
   return <View style={s.stack}>
     <RequestState state={state} />
     {data && <>
-      <Text style={s.heading}>{data.route.name}-{data.selectedVariant.headsign.toLocaleUpperCase('it-IT')}</Text>
       <GlassSurface style={s.departureStrip}>
         <Text numberOfLines={1} style={s.departureLabel} accessibilityLabel="Partenze dal capolinea, da dieci minuti fa a un’ora avanti">Partenze da {data.selectedVariant.fromName.toLocaleUpperCase('it-IT')}:</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.departureScroller} contentContainerStyle={s.departureTrack}>
@@ -86,8 +85,10 @@ export function RouteTimeline() {
 
       {selected && vehicleInfo && [...stop.vehiclesAt, ...stop.vehiclesBefore].some(v => v.id === selected.id) && <GlassSurface accessibilityRole="alert" style={s.vehicleInfo}>
         <View style={s.row}><Text style={[s.heading, s.flex]}>Vettura {selected.vehicleId || 'non disponibile'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Chiudi dettagli autobus" onPress={() => setVehicleInfo(null)}><Text style={s.close}>×</Text></Pressable></View>
-        <Text style={s.muted}>{selected.retained || Boolean(state.error) || now - selected.timestamp > 90 ? 'Ultima posizione nota vicino a' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text><Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
-        {selected.lat !== null && selected.lon !== null && <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(`https://maps.apple.com/?ll=${selected.lat},${selected.lon}&q=Bus%20${encodeURIComponent(selected.vehicleId || data.route.name)}`); }}><Text style={s.link}>Apri posizione in Mappe ↗</Text></Pressable>}
+        <Text style={s.muted}>{selected.positionSource === 'predictions' ? 'Prossima fermata da previsioni live:' : selected.retained || Boolean(state.error) || now - selected.timestamp > 90 ? 'Ultima posizione nota vicino a' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text>
+        {selected.positionSource === 'predictions' && <Text style={s.small}>Prossimo arrivo previsto, non posizione GPS. Previsione alle {positionStamp(selected.predictionTimestamp || null).replace('Posizioni alle ', '')}.</Text>}
+        <Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
+        {selected.lat !== null && selected.lon !== null && <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(`https://maps.apple.com/?ll=${selected.lat},${selected.lon}&q=Bus%20${encodeURIComponent(selected.vehicleId || data.route.name)}`); }}><Text style={s.link}>Apri rilevazione GPS in Mappe ↗</Text></Pressable>}
       </GlassSurface>}
           </View>;
         })}
@@ -95,7 +96,7 @@ export function RouteTimeline() {
       <Text style={s.small}>{data.liveAvailable ? `${positionStamp(data.timestamp)} · ogni 30 s` : 'Posizioni live non disponibili'}</Text>
       {data.liveAvailable && !vehicleCount && <Notice text="Nessun bus localizzabile su questa direzione dal feed attuale. Non indica necessariamente assenza di servizio." />}
       {!!data.unplacedVehicleCount && <Notice text={`${data.unplacedVehicleCount} posizioni non associabili alle fermate: non vengono collocate sul percorso.`} />}
-      <Text style={s.legend}>Icone: ultime posizioni ricevute, aggiornate ogni 30 s. Le misure oltre 90 s o conservate dallo storico non sono mostrate. ≈ indica un’associazione GPS approssimata.</Text>
+      <Text style={s.legend}>Icone aggiornate ogni 30 s: la prossima fermata può essere ricavata dalle previsioni live della stessa vettura; il dettaglio distingue previsione e GPS. Le misure oltre 90 s e lo storico non sono mostrati.</Text>
 
     </>}
   </View>;
@@ -115,8 +116,6 @@ const s = StyleSheet.create({
   stopTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stopArrow: { color: '#a01d35', fontSize: 22 },
   busBefore: { position: 'absolute', top: -12, left: 0, right: 0, height: 26 }, busAt: { height: 26, flexGrow: 0, width: '100%' }, busTrack: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   busButton: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },
-  busBody: { width: 24, height: 12, borderRadius: 3, backgroundColor: '#a01d35', padding: 2, marginBottom: 2 }, estimatedBus: { backgroundColor: '#8c6a2e' },
-  busWindows: { flexDirection: 'row', gap: 1, alignItems: 'flex-start' }, busWindow: { width: 4, height: 4, backgroundColor: '#fff', borderRadius: 1 }, busDoor: { width: 3, height: 7, backgroundColor: '#f8f6f2' }, busFront: { width: 4, height: 5, backgroundColor: '#fff', borderTopRightRadius: 2 },
-  wheels: { position: 'absolute', bottom: -2, left: 3, right: 3, flexDirection: 'row', justifyContent: 'space-between' }, wheel: { width: 4, height: 4, backgroundColor: '#202d3a', borderRadius: 2 }, busId: { fontSize: 8, lineHeight: 10, color: '#a01d35', maxWidth: 30 },
+  busImage: { width: 22, height: 18, tintColor: '#a01d35' }, busId: { fontSize: 7, lineHeight: 8, color: '#a01d35', maxWidth: 30 },
   vehicleInfo: { borderRadius: 20, margin: 10, padding: 16, gap: 8 }, link: { color: '#a01d35', fontSize: 14, fontWeight: '600' }, close: { fontSize: 28, color: '#a01d35', paddingHorizontal: 10 },
 });

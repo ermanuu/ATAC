@@ -153,3 +153,12 @@ Ferma backend ed Expo. Dallo ZIP aggiornato di `main` copia `App.tsx`, tutta `sr
 Riavvia il backend con `set API_HOST=0.0.0.0` e `npm run api`. Nell’altra finestra mantieni `EXPO_PUBLIC_API_URL` impostato all’IP del PC e avvia `npm start -- --clear --lan`. Scansiona il nuovo QR.
 
 In Direzione e Autobus in arrivo l’aggiornamento automatico è ogni 30 secondi; trascina dall’alto verso il basso per aggiornare subito. Il vecchio pulsante Aggiorna arrivi è stato rimosso. Gli ETA live sono verdi. Per i numeri vettura corretti e il bypass della cache serve aggiornare e riavviare anche il backend.
+
+
+## Aggiornare posizione 706, icona frontale e intestazione
+
+Arresta backend ed Expo. Dallo ZIP aggiornato di `main` copia in `C:\ATAC` `App.tsx`, tutta `src`, `assets\bus-front.png` e i file di `server`, incluso il nuovo `progress.py`. Unisci le cartelle e sostituisci i file, conservando `server\data`, `.venv` e `.env`. Non servono nuove dipendenze né una nuova importazione degli orari.
+
+Riavvia il backend con `set API_HOST=0.0.0.0` e `npm run api`. Nell’altra finestra, mantenendo l’indirizzo del backend in `EXPO_PUBLIC_API_URL` o nel file `.env`, esegui `npm start -- --clear --lan` e apri il nuovo QR.
+
+Il percorso ha Cerca linea a sinistra, il nome linea-direzione fisso al centro e Cambia Direzione a destra. L’icona frontale è rossa. Il dettaglio della vettura distingue la fermata prevista dalle coordinate GPS: una previsione coerente e recente della stessa vettura può aggiornare il prossimo arrivo senza spacciarlo per una nuova rilevazione geografica.

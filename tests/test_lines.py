@@ -224,6 +224,95 @@ class LineTests(unittest.TestCase):
         self.assertFalse(second['stops'][1]['vehiclesBefore'])
         self.assertEqual(second['stops'][2]['vehiclesBefore'][0]['id'],'advancing')
 
+    def test_stop_id_wins_over_conflicting_sequence_counter(self):
+        self.add_trip('rome',36000,headsign='EUR FERMI (MB)',stops=('a','b','c'))
+        v=self.vehicle(self.feed('vehicles'),'2641',trip='rome',sequence=20,stop='c',status=pb.VehiclePosition.IN_TRANSIT_TO)
+        v.vehicle.label='2641'
+        v.position.latitude=41.905; v.position.longitude=12.495
+        board=self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['vehicleId'],'2641')
+        self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['positionSource'],'stop_id')
+
+    def test_gps_does_not_regress_valid_next_stop(self):
+        self.add_trip('rome',36000,headsign='EUR FERMI (MB)',stops=('a','b','c'))
+        v=self.vehicle(self.feed('vehicles'),'2641',trip='rome',sequence=30,stop='c',status=pb.VehiclePosition.IN_TRANSIT_TO)
+        v.position.latitude=41.905; v.position.longitude=12.495
+        board=self.board('EUR FERMI (MB)')
+        self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['id'],'2641')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+
+    def rome_forecast(self):
+        self.add_trip('rome',36000,headsign='EUR FERMI (MB)',stops=('a','b','c'))
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE stops SET name='NAIROBI/S. EUGENIO (H)' WHERE stop_id='b'")
+            db.execute("UPDATE stops SET name='AFRICA/ARTE' WHERE stop_id='c'")
+        v=self.vehicle(self.feed('vehicles'),'technical-2641',trip='rome',sequence=20,stop='b',status=pb.VehiclePosition.IN_TRANSIT_TO,timestamp=self.now-30)
+        v.vehicle.label='2641'
+        updates=self.feed('updates'); e=updates.entity.add(); e.id='forecast-2641'
+        u=e.trip_update; u.trip.trip_id='rome'; u.trip.start_date='20261030'
+        u.vehicle.id='technical-2641'; u.vehicle.label='2641'; u.timestamp=self.now
+        event=u.stop_time_update.add(); event.stop_sequence=20; event.arrival.time=self.now-15
+        event=u.stop_time_update.add(); event.stop_sequence=30; event.arrival.time=self.now+20
+        return v,u
+
+    def test_2641_forecast_is_before_africa_not_nairobi(self):
+        self.rome_forecast()
+        board=self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertEqual(board['stops'][2]['name'],'AFRICA/ARTE')
+        item=board['stops'][2]['vehiclesBefore'][0]
+        self.assertEqual(item['vehicleId'],'2641')
+        self.assertEqual(item['positionSource'],'predictions')
+        self.assertEqual(item['timestamp'],self.now-30)
+        self.assertEqual(item['predictionTimestamp'],self.now)
+
+    def test_forecast_for_other_vehicle_does_not_move_icon(self):
+        _,u=self.rome_forecast(); u.vehicle.id='other'; u.vehicle.label='2618'
+        self.assertEqual(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'][0]['vehicleId'],'2641')
+
+    def test_older_forecast_cannot_override_newer_position(self):
+        v,u=self.rome_forecast(); v.timestamp=self.now; u.timestamp=self.now-30
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_equal_timestamp_forecast_can_resolve_next_arrival(self):
+        v,_=self.rome_forecast(); v.timestamp=self.now
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
+
+    def test_missing_earlier_prediction_cannot_skip_a_stop(self):
+        _,u=self.rome_forecast(); del u.stop_time_update[0]
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_dwell_departure_still_future_does_not_advance(self):
+        _,u=self.rome_forecast(); u.stop_time_update[0].departure.time=self.now+10
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_delay_only_forecasts_resolve_same_next_stop(self):
+        self.now += 1200
+        _,u=self.rome_forecast()
+        u.stop_time_update[0].arrival.ClearField('time'); u.stop_time_update[0].arrival.delay=590
+        u.stop_time_update[1].arrival.ClearField('time'); u.stop_time_update[1].arrival.delay=20
+        self.assertEqual(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'][0]['positionSource'],'predictions')
+
+    def test_forecast_without_vehicle_identity_does_not_move_icon(self):
+        _,u=self.rome_forecast(); u.ClearField('vehicle')
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_no_data_event_cannot_be_treated_as_passed_stop(self):
+        _,u=self.rome_forecast(); u.stop_time_update[0].schedule_relationship=pb.TripUpdate.StopTimeUpdate.NO_DATA
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_newer_no_data_supersedes_older_progress_forecast(self):
+        _,u=self.rome_forecast(); u.timestamp=self.now-5
+        newer=self.feeds['updates']['feed'].entity.add(); newer.id='newer'
+        newer.trip_update.CopyFrom(u); newer.trip_update.timestamp=self.now
+        newer.trip_update.stop_time_update[0].schedule_relationship=pb.TripUpdate.StopTimeUpdate.NO_DATA
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_prediction_on_wrong_service_day_does_not_move_icon(self):
+        _,u=self.rome_forecast(); u.trip.start_date='20261031'
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
     def test_moving_bus_advances_past_declared_next_stop(self):
         self.add_trip('progress',36000,headsign='Progress',stops=('a','b','c'))
         feed=self.feed('vehicles')

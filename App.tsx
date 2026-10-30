@@ -1,3 +1,4 @@
+import { LineHeaderProvider, useLineHeader } from './src/lib/LineHeader';
 import { RefreshProvider, useRefresh } from './src/lib/Refresh';
 import { GlassBackground, GlassPressable, GlassProvider, GlassSurface, glassStyle } from './src/ui/Glass';
 import { NavIcon } from './src/ui/NavIcon';
@@ -82,8 +83,9 @@ function StopSearch({ label, selected, onSelect }: { label: string; selected: St
     {!selected && state.data?.map(stop => <GlassPressable accessibilityRole="button" key={stop.stop_id} style={s.stop} onPress={() => onSelect(stop)}><Text style={s.body}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassPressable>)}
   </View>;
 }
-export default function App() { return <RefreshProvider><AppShell /></RefreshProvider>; }
+export default function App() { return <RefreshProvider><LineHeaderProvider><AppShell /></LineHeaderProvider></RefreshProvider>; }
 function AppShell() {
+  const { title } = useLineHeader();
   const { refresh, refreshing } = useRefresh();
   const insets = useSafeAreaInsets();
   const [logoReady, setLogoReady] = useState(false);
@@ -93,6 +95,8 @@ function AppShell() {
   const home = pathname === '/';
   const lineDetail = pathname.startsWith('/line/');
   const stopDetail = pathname.startsWith('/stop/') || (pathname === '/stops' && Boolean(params.stopId));
+  const board = lineDetail && Boolean(params.id && params.variant);
+  const lineTitle = title && title.routeId === params.id && title.variant === params.variant ? `${title.line}-${title.direction.toLocaleUpperCase('it-IT')}` : '';
   const tab = stopDetail || pathname === '/stops' ? 'stops' : pathname === '/plan' ? 'plan' : 'lines';
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [pathname, params.stopId]);
   const returnToSearch = () => router.replace({ pathname: '/lines', params: { focus: '1' } });
@@ -103,11 +107,16 @@ function AppShell() {
   return <GlassProvider><View style={s.safe}><GlassBackground /><SafeAreaView edges={['top', 'left', 'right']} style={s.safeContent}><StatusBar style="dark" />
     {!home && !lineDetail && !stopDetail && <View style={s.fixedHeader}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Torna alla home" style={s.headerAction} onPress={() => router.replace('/')}><Text style={s.headerActionText}>← Home</Text></GlassPressable></View>}
 
-    {(lineDetail || stopDetail) && <View style={s.fixedHeader}>
+    {board && <View style={s.boardHeader}>
+      <View style={s.headerLeft}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Torna a cerca linea" style={s.boardAction} onPress={returnToSearch}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={s.boardActionText}>← Cerca linea</Text></GlassPressable></View>
+      <Text accessibilityRole="header" accessibilityLabel={lineTitle || 'Caricamento linea'} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8} style={s.boardTitle}>{lineTitle || 'Linea…'}</Text>
+      <View style={s.headerRight}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Cambia Direzione" style={s.boardAction} onPress={() => router.replace({ pathname: '/line/[id]', params: { id: params.id! } })}><Text style={s.boardActionText}>Cambia Direzione</Text></GlassPressable></View>
+    </View>}
+    {!board && (lineDetail || stopDetail) && <View style={s.fixedHeader}>
       <GlassPressable floating accessibilityRole="button" accessibilityLabel={lineDetail ? 'Torna a cerca linea' : params.fromRouteId && params.fromVariant ? 'Torna alla linea' : 'Torna a cerca fermata'} style={[s.headerAction, s.headerReturn]} onPress={lineDetail ? returnToSearch : returnFromStop}>
         <Text numberOfLines={1} style={s.headerActionText}>{lineDetail ? '← Cerca linea' : params.fromRouteId && params.fromVariant ? `← Torna alla linea ${params.fromLine || ''}` : '← Cerca fermata'}</Text>
       </GlassPressable>
-      {lineDetail && params.id && params.variant && <GlassPressable floating accessibilityRole="button" accessibilityLabel="Cambia direzione" style={s.headerAction} onPress={() => router.replace({ pathname: '/line/[id]', params: { id: params.id! } })}><Text style={s.headerActionText}>Direzione</Text></GlassPressable>}
+
     </View>}
     <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#96002d" colors={['#96002d']} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : s.scroll}>
       <Slot />
@@ -263,6 +272,7 @@ export function Planner() {
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f4f0f3' }, safeContent: { flex: 1 },
   homeLogo: { width: 240, height: 130, alignSelf: 'center' }, launchScreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, backgroundColor: '#ffffff', justifyContent: 'center', alignItems: 'center', gap: 8 }, launchLogo: { width: 240, height: 240 }, launchName: { color: '#96002d', fontWeight: '800', fontSize: 12, letterSpacing: 2, marginBottom: 24 },
+  boardHeader: { minHeight: 60, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }, headerLeft: { width: 82 }, headerRight: { width: 96 }, boardAction: { minHeight: 44, borderRadius: 22, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' }, boardActionText: { color: '#a01d35', fontWeight: '700', fontSize: 10, lineHeight: 14, textAlign: 'center' }, boardTitle: { flex: 1, textAlign: 'center', color: '#202d3a', fontWeight: '800', fontSize: 12, lineHeight: 16 },
   fixedHeader: { minHeight: 56, paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', gap: 8, marginBottom: 12 },
   headerAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 22 }, headerReturn: { maxWidth: '100%' }, headerActionText: { color: '#a01d35', fontWeight: '700', fontSize: 13 },
   homeContent: { paddingHorizontal: 24 }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 28, width: '100%', maxWidth: 420, alignSelf: 'center', paddingTop: 12, paddingBottom: 36 }, homeHeader: { gap: 12, alignItems: 'center' }, homeActions: { gap: 14 }, eyebrow: { fontSize: 11, fontWeight: '800', color: '#a01d35', letterSpacing: 2.2 }, homeTitle: { fontSize: 34, fontWeight: '800', color: '#202d3a', marginTop: 6, letterSpacing: -1.3, textAlign: 'center' }, homeSubtitle: { color: '#536373', fontSize: 15, textAlign: 'center' }, flex: { flex: 1 }, stack: { gap: 14 },
