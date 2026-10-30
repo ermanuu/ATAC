@@ -1,10 +1,11 @@
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
 
+const ATAC_LOGO = require('./assets/atac-logo.png');
 const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 export type Stop = { stop_id: string; name: string };
 export type Route = { route_id: string; name: string; description: string };
@@ -68,6 +69,7 @@ function StopSearch({ label, selected, onSelect }: { label: string; selected: St
   </View>;
 }
 export default function App() {
+  const [logoReady, setLogoReady] = useState(false);
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ id?: string; variant?: string; stopId?: string; fromRouteId?: string; fromVariant?: string; fromLine?: string }>();
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
@@ -92,6 +94,10 @@ export default function App() {
     <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : s.scroll}>
       <Slot />
     </ScrollView></View>
+    {!logoReady && <View accessibilityLabel="Avvio app" style={s.launchScreen}>
+      <Image source={ATAC_LOGO} resizeMode="contain" accessibilityLabel="Logo ATAC" style={s.launchLogo} onLoadEnd={() => requestAnimationFrame(() => requestAnimationFrame(() => setLogoReady(true)))} />
+      <ActivityIndicator color="#a01d35" accessibilityLabel="Caricamento" />
+    </View>}
   </SafeAreaView>;
 }
 export function Home() {
@@ -100,6 +106,7 @@ export function Home() {
   return <View style={s.home}>
     <View style={s.homeHeader}>
       <View style={s.row}><Text style={s.eyebrow}>ROMA · AUTOBUS</Text><Text style={[s.small, { color: live ? '#167450' : '#9b6a20' }]}>{live ? '● Feed live' : state.loading ? 'Verifica live…' : '● Live non disponibile'}</Text></View>
+      <Image source={ATAC_LOGO} resizeMode="contain" accessibilityLabel="Logo ATAC" style={s.homeLogo} />
       <Text style={s.homeTitle}>La città, in movimento.</Text>
       <Text style={s.homeSubtitle}>Linee, fermate e percorsi a Roma</Text>
     </View>
@@ -200,6 +207,7 @@ export function Planner() {
 }
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f8f6f2' },
+  homeLogo: { width: 100, height: 50, alignSelf: 'flex-start' }, launchScreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, backgroundColor: '#ffffff', justifyContent: 'center', alignItems: 'center', gap: 24 }, launchLogo: { width: 200, height: 100 },
   fixedHeader: { minHeight: 56, paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: '#e3dfd8', marginBottom: 12 },
   headerAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 10 }, headerReturn: { backgroundColor: '#ebe8e3', maxWidth: '80%' }, headerActionText: { color: '#a01d35', fontWeight: '700', fontSize: 13 },
   homeContent: { paddingHorizontal: 24 }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 32, width: '100%', maxWidth: 420, alignSelf: 'center', paddingVertical: 20 }, homeHeader: { gap: 8 }, homeActions: { gap: 20 }, eyebrow: { fontSize: 11, fontWeight: '800', color: '#a01d35', letterSpacing: 1.4, flex: 1 }, homeTitle: { fontSize: 34, fontWeight: '800', color: '#202d3a', marginTop: 14, letterSpacing: -1.3 }, homeSubtitle: { color: '#596878', fontSize: 16 }, flex: { flex: 1 }, stack: { gap: 14 },

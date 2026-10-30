@@ -4,7 +4,7 @@
     "slug": "ATAC",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/atac-app-icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false
@@ -24,7 +24,16 @@
     "scheme": "romabus",
     "plugins": [
       "expo-router",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/atac-logo.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
