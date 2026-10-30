@@ -9,7 +9,7 @@ import threading
 import time
 import urllib.request
 import zipfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -58,7 +58,9 @@ def import_gtfs(payload):
     temporary = DATA / "import.sqlite"
     temporary.unlink(missing_ok=True)
     try:
-        with zipfile.ZipFile(io.BytesIO(payload)) as archive, sqlite3.connect(temporary) as db:
+        # SQLite's transaction context manager does not close the connection.
+        # Windows requires it closed before replacing or deleting the file.
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive, closing(sqlite3.connect(temporary)) as db:
             db.executescript("""
                 CREATE TABLE routes(route_id TEXT PRIMARY KEY, name TEXT, description TEXT, type INTEGER);
                 CREATE TABLE stops(stop_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL);

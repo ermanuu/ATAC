@@ -2,6 +2,7 @@
 import io
 from pathlib import Path
 import tempfile
+import sqlite3
 import time
 import unittest
 from unittest.mock import patch
@@ -81,6 +82,55 @@ class TransitTests(unittest.TestCase):
         before = t.DB.read_bytes()
         with self.assertRaises(zipfile.BadZipFile):
             t.import_gtfs(b"invalid feed")
+        self.assertEqual(t.DB.read_bytes(), before)
+
+    def tracked_connections(self):
+        connections = []
+        original = sqlite3.connect
+
+        class TrackedConnection(sqlite3.Connection):
+            closed = False
+
+            def close(self):
+                super().close()
+                self.closed = True
+
+        def create(*args, **kwargs):
+            connection = original(*args, **kwargs, factory=TrackedConnection)
+            connections.append(connection)
+            return connection
+
+        return connections, create
+
+    def test_database_closed_before_replace_on_windows(self):
+        connections, create = self.tracked_connections()
+        replace = t.os.replace
+
+        def windows_replace(source, destination):
+            self.assertTrue(connections)
+            self.assertTrue(all(c.closed for c in connections), "Windows locks an open SQLite database")
+            return replace(source, destination)
+
+        with patch.object(t.sqlite3, "connect", side_effect=create), patch.object(t.os, "replace", side_effect=windows_replace):
+            t.import_gtfs(fixture())
+        self.assertEqual(t.routes("64")[0]["route_id"], "r1")
+
+    def test_database_closed_before_failed_import_cleanup_on_windows(self):
+        connections, create = self.tracked_connections()
+        unlink = Path.unlink
+        before = t.DB.read_bytes()
+
+        def windows_unlink(path, *args, **kwargs):
+            if path.name == "import.sqlite" and path.exists():
+                self.assertTrue(all(c.closed for c in connections), "Windows cannot delete an open SQLite database")
+            return unlink(path, *args, **kwargs)
+
+        with patch.object(t.sqlite3, "connect", side_effect=create), patch.object(Path, "unlink", windows_unlink), patch.object(t, "seconds", side_effect=ValueError("invalid GTFS time")):
+            with self.assertRaisesRegex(ValueError, "invalid GTFS time"):
+                t.import_gtfs(fixture())
+        self.assertTrue(connections)
+        self.assertTrue(all(c.closed for c in connections))
+        self.assertFalse((t.DATA / "import.sqlite").exists())
         self.assertEqual(t.DB.read_bytes(), before)
 
     def test_realtime_rejects_stale_and_caches_failures(self):
