@@ -162,3 +162,14 @@ Arresta backend ed Expo. Dallo ZIP aggiornato di `main` copia in `C:\ATAC` `App.
 Riavvia il backend con `set API_HOST=0.0.0.0` e `npm run api`. Nell’altra finestra, mantenendo l’indirizzo del backend in `EXPO_PUBLIC_API_URL` o nel file `.env`, esegui `npm start -- --clear --lan` e apri il nuovo QR.
 
 Il percorso ha Cerca linea a sinistra, il nome linea-direzione fisso al centro e Cambia Direzione a destra. L’icona frontale è rossa. Il dettaglio della vettura distingue la fermata prevista dalle coordinate GPS: una previsione coerente e recente della stessa vettura può aggiornare il prossimo arrivo senza spacciarlo per una nuova rilevazione geografica.
+
+
+## Preferite, priorità live e verifica PAVESE/COLOMBO
+
+Ferma backend ed Expo. Dallo ZIP aggiornato copia in `C:\ATAC` `App.tsx`, tutta `src`, i file di `server` e `package.json`. Sono inclusi i nuovi `server\realtime_utils.py`, `server\diagnostics.py`, `src\lib\arrivals.ts` e `src\lib\favoriteStops.ts`. Unisci le cartelle, conservando `server\data`, `.venv` e `.env`. Non servono nuove dipendenze né una nuova importazione degli orari.
+
+Riavvia il backend (`set API_HOST=0.0.0.0`, poi `npm run api`) e nell’altra finestra Expo (`npm start -- --clear --lan`), mantenendo `EXPO_PUBLIC_API_URL` o il file `.env` con l’IP del PC. Apri il nuovo QR.
+
+- Nel dettaglio di una fermata, tocca ☆ per salvarla e ★ per rimuoverla. Le preferite compaiono nella scheda Fermate e restano salvate dopo la chiusura dell’app.
+- Gli arrivi live sono in testa. I programmati sono il ripiego per le direzioni che non hanno live; non sostituiscono né duplicano una direzione già coperta da previsioni.
+- Se l’icona resta sbagliata, tocca il bus, poi **Condividi dati della vettura → Copia** e incolla il testo nella chat. Questo permette di confrontare i riferimenti reali a PAVESE e COLOMBO, l’ID della corsa e i timestamp, che negli screenshot non sono visibili.

@@ -1,3 +1,5 @@
+import { visibleArrivals, type Arrival } from './src/lib/arrivals';
+import { parseFavoriteStops, toggleFavoriteStop } from './src/lib/favoriteStops';
 import { LineHeaderProvider, useLineHeader } from './src/lib/LineHeader';
 import { RefreshProvider, useRefresh } from './src/lib/Refresh';
 import { GlassBackground, GlassPressable, GlassProvider, GlassSurface, glassStyle } from './src/ui/Glass';
@@ -15,9 +17,9 @@ const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 export type Stop = { stop_id: string; name: string };
 export type Route = { route_id: string; name: string; description: string };
 type Health = { vehicles: { available: boolean }; updates: { available: boolean } };
-type Arrivals = { apiVersion?: number; arrivals: { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; line: string; headsign: string; time: number; scheduledTime?: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
+type Arrivals = { apiVersion?: number; arrivals: Arrival[]; liveAvailable: boolean; timestamp: number | null };
 type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
-async function api<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
+export async function api<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
   if (!API) throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
   const response = await fetch(`${API}/api/${path}${force ? `${path.includes('?') ? '&' : '?'}fresh=1` : ''}`, { signal });
   const body = await response.json();
@@ -192,17 +194,36 @@ export function Lines() {
   </View>;
 }
 export function Stops() {
+  const [favorites, setFavorites] = useState<Stop[]>([]);
+  const [favoritesReady, setFavoritesReady] = useState(false);
+  const [favoriteError, setFavoriteError] = useState('');
+  const savingFavorite = useRef(false);
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem('favorite-stops').then(raw => { if (active) { setFavorites(parseFavoriteStops(raw)); setFavoritesReady(true); } })
+      .catch(() => { if (active) setFavoriteError('Impossibile leggere le fermate preferite.'); });
+    return () => { active = false; };
+  }, []);
+  const toggleFavorite = async (selected: Stop) => {
+    if (!favoritesReady || savingFavorite.current) return;
+    savingFavorite.current = true; setFavoriteError('');
+    const next = toggleFavoriteStop(favorites, selected);
+    try { await AsyncStorage.setItem('favorite-stops', JSON.stringify(next)); setFavorites(next); }
+    catch { setFavoriteError('Impossibile salvare le fermate preferite. Riprova.'); }
+    finally { savingFavorite.current = false; }
+  };
   const params = useLocalSearchParams<{ stopId?: string; stopName?: string; fromRouteId?: string; fromVariant?: string; fromLine?: string }>();
   const [stop, setStop] = useState<Stop | null>(() => params.stopId && params.stopName ? { stop_id: params.stopId, name: params.stopName } : null);
   useEffect(() => {
     if (params.stopId && params.stopName) setStop({ stop_id: params.stopId, name: params.stopName });
   }, [params.stopId, params.stopName]);
   const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 30000, true);
-  const [now, setNow] = useState(() => Date.now() / 1000);
+  const [tick, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
     return () => clearInterval(timer);
   }, []);
+  const now = Math.max(tick, state.receivedAt);
   const navigation = useRef<AbortController | null>(null);
   const [openingRoute, setOpeningRoute] = useState<string | null>(null);
   const [navigationError, setNavigationError] = useState('');
@@ -222,11 +243,18 @@ export function Stops() {
   };
   const specificStop = Boolean(params.stopId);
   const liveFresh = Boolean(!state.error && state.data?.liveAvailable && state.data.timestamp && now - state.data.timestamp <= 180);
-  const arrivals = (state.data?.arrivals || []).map(a => a.kind === 'live' && !liveFresh
-    ? { ...a, time: a.scheduledTime || 0, kind: 'scheduled' } : a).filter(a => a.time >= now && a.time <= now + 7200);
+  const arrivals = visibleArrivals(state.data?.arrivals || [], now, liveFresh);
   return <View style={s.stack}>
     <Text style={s.heading}>{specificStop ? 'Autobus in arrivo' : 'Cerca fermata'}</Text>
-    {specificStop && stop ? <GlassSurface style={s.card}><Text style={s.heading}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassSurface> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
+    {!!favoriteError && <Notice text={favoriteError} />}
+    {!specificStop && favorites.length > 0 && <View style={s.stack}>
+      <Text style={s.heading}>Preferite</Text>
+      {favorites.map(favorite => <GlassSurface key={favorite.stop_id} style={s.favoriteRow}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Apri fermata preferita ${favorite.name}`} style={s.favoriteOpen} onPress={() => router.push({ pathname: '/stop/[stopId]', params: { stopId: favorite.stop_id, stopName: favorite.name } })}><Text style={s.body}>{favorite.name}</Text><Text style={s.small}>Fermata {favorite.stop_id} ›</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Rimuovi ${favorite.name} dalle preferite`} style={s.favoriteToggle} onPress={() => { void toggleFavorite(favorite); }}><Text style={s.favoriteStar}>★</Text></Pressable>
+      </GlassSurface>)}
+    </View>}
+    {specificStop && stop ? <GlassSurface style={s.card}><View style={s.row}><Text style={[s.heading, s.flex]}>{stop.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={favorites.some(f => f.stop_id === stop.stop_id) ? 'Rimuovi fermata dalle preferite' : 'Aggiungi fermata alle preferite'} accessibilityState={{ selected: favorites.some(f => f.stop_id === stop.stop_id), disabled: !favoritesReady }} disabled={!favoritesReady} style={s.favoriteToggle} onPress={() => { void toggleFavorite(stop); }}><Text style={s.favoriteStar}>{favorites.some(f => f.stop_id === stop.stop_id) ? '★' : '☆'}</Text></Pressable></View><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassSurface> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
     <RequestState state={state} />
     {openingRoute && <View style={s.row}><ActivityIndicator color="#a01d35" /><Text style={s.muted}>Apertura itinerario…</Text></View>}
     {!!navigationError && <Notice text={navigationError} />}
@@ -287,6 +315,7 @@ const s = StyleSheet.create({
   route: { padding: 16, flexDirection: 'row', gap: 14, alignItems: 'center' },
   badge: { minWidth: 52, borderRadius: 18, padding: 12, backgroundColor: 'rgba(150,0,45,0.10)', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(150,0,45,0.08)' }, badgeText: { color: '#96002d', fontSize: 18, fontWeight: '800' },
   arrow: { fontSize: 28, color: '#a01d35' }, time: { fontSize: 20, fontWeight: '700', color: '#202d3a' },
+  favoriteRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }, favoriteOpen: { flex: 1, paddingVertical: 16, gap: 4 }, favoriteToggle: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, favoriteStar: { fontSize: 27, color: '#a01d35' },
   liveEta: { color: '#167450' },
   arrivalTime: { alignItems: 'flex-end', gap: 4 },
   button: { padding: 16, borderRadius: 24, alignItems: 'center' }, buttonText: { color: '#96002d', fontWeight: '700', fontSize: 15 },

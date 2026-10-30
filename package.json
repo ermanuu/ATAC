@@ -36,7 +36,7 @@
     "api": "node scripts/backend.mjs -m server.app",
     "data:import": "node scripts/backend.mjs -m server.import_gtfs",
     "lint": "expo lint",
-    "test:client": "node tests/resolve-arrival.test.mjs"
+    "test:client": "node tests/resolve-arrival.test.mjs && node tests/arrivals-favorites.test.mjs"
   },
   "private": true
 }

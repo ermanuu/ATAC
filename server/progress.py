@@ -2,9 +2,10 @@
 from datetime import datetime
 from google.transit import gtfs_realtime_pb2 as pb
 from . import transit as t
+from .realtime_utils import stop_event_index
 
 
-def next_arrival(vehicle, trip, stops, start, measurement_time, now, live, windows):
+def next_arrival(vehicle, trip, stops, start, now, live, windows):
     if start is None or not trip or not live or not live.get('available'):
         return None
     candidates = []
@@ -29,7 +30,7 @@ def next_arrival(vehicle, trip, stops, start, measurement_time, now, live, windo
                for field in ('start_date', 'start_time', 'route_id')):
             continue
         stamp = int(update.timestamp or live['timestamp'] or 0)
-        if stamp < measurement_time or not 0 <= now - stamp <= 90:
+        if not 0 <= now - stamp <= 180:
             continue
         date = update.trip.start_date or vehicle.trip.start_date
         epochs = [epoch for epoch, active in windows if trip['service_id'] in active and
@@ -49,19 +50,14 @@ def next_arrival(vehicle, trip, stops, start, measurement_time, now, live, windo
         epoch = epochs[0]
         events = {}
         for event in update.stop_time_update:
-            if event.HasField('stop_sequence'):
-                indices = [i for i, stop in enumerate(stops) if stop['sequence'] == event.stop_sequence and
-                           (not event.stop_id or event.stop_id == stop['stop_id'])]
-            else:
-                indices = [i for i, stop in enumerate(stops) if stop['stop_id'] == event.stop_id]
-            if len(indices) == 1:
-                events[indices[0]] = event
-        for index in range(start, len(stops)):
+            index = stop_event_index(event, stops)
+            if index is not None:
+                events[index] = event
+
+        def event_times(index):
             event = events.get(index)
-            if event is None or event.schedule_relationship == pb.TripUpdate.StopTimeUpdate.NO_DATA:
-                break
-            if event.schedule_relationship == pb.TripUpdate.StopTimeUpdate.SKIPPED:
-                continue
+            if event is None or event.schedule_relationship in (pb.TripUpdate.StopTimeUpdate.NO_DATA, pb.TripUpdate.StopTimeUpdate.SKIPPED):
+                return {}
             times = {}
             for field in ('arrival', 'departure'):
                 if event.HasField(field):
@@ -70,6 +66,26 @@ def next_arrival(vehicle, trip, stops, start, measurement_time, now, live, windo
                         times[field] = int(prediction.time)
                     elif prediction.HasField('delay'):
                         times[field] = int(epoch + stops[index][field] + prediction.delay)
+            return times
+
+        begin = start
+        if events and min(events) > start:
+            # A future-only update can omit the passed prefix. Require
+            # two consecutive future stops, not an isolated downstream ETA.
+            first = min(events)
+            first_times, following_times = event_times(first), event_times(first + 1)
+            first_time = first_times.get('arrival', first_times.get('departure'))
+            following_time = following_times.get('arrival', following_times.get('departure'))
+            if first_time is None or following_time is None or not now <= first_time <= now + 600 or following_time < first_time:
+                continue
+            begin = first
+        for index in range(begin, len(stops)):
+            event = events.get(index)
+            if event is None or event.schedule_relationship == pb.TripUpdate.StopTimeUpdate.NO_DATA:
+                break
+            if event.schedule_relationship == pb.TripUpdate.StopTimeUpdate.SKIPPED:
+                continue
+            times = event_times(index)
             arrival = times.get('arrival', times.get('departure'))
             passed = times.get('departure', times.get('arrival'))
             if arrival is None:

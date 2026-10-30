@@ -271,9 +271,42 @@ class LineTests(unittest.TestCase):
         _,u=self.rome_forecast(); u.vehicle.id='other'; u.vehicle.label='2618'
         self.assertEqual(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'][0]['vehicleId'],'2641')
 
-    def test_older_forecast_cannot_override_newer_position(self):
+    def test_valid_arrival_forecast_is_not_rejected_due_to_newer_gps_clock(self):
         v,u=self.rome_forecast(); v.timestamp=self.now; u.timestamp=self.now-30
-        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
+
+    def future_only_forecast(self):
+        self.add_trip('2610',36000,headsign='RO TELLINI',stops=('a','b','c','d'))
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE stops SET name='OCEANO ATLANTICO/PAVESE' WHERE stop_id='b'")
+            db.execute("UPDATE stops SET name='OCEANO ATLANTICO/COLOMBO' WHERE stop_id='c'")
+        v=self.vehicle(self.feed('vehicles'),'rt-2610',trip='2610',sequence=20,stop='b',status=pb.VehiclePosition.IN_TRANSIT_TO)
+        v.vehicle.label='2610'
+        f=self.feed('updates'); e=f.entity.add(); e.id='2610'; u=e.trip_update; u.trip.trip_id='2610'; u.vehicle.id='rt-2610'; u.vehicle.label='2610'; u.trip.start_date='20261030'; u.timestamp=self.now-120
+        for sequence,delta in [(30,120),(40,240)]:
+            event=u.stop_time_update.add(); event.stop_sequence=sequence; event.arrival.time=self.now+delta
+        return v,u
+
+    def test_2610_future_only_forecast_moves_from_pavese_to_colombo(self):
+        self.future_only_forecast()
+        board=self.board('RO TELLINI')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        item=board['stops'][2]['vehiclesBefore'][0]
+        self.assertEqual(item['vehicleId'],'2610')
+        self.assertEqual(item['positionSource'],'predictions')
+        self.assertEqual(item['predictionTimestamp'],self.now-120)
+
+    def test_expired_future_only_forecast_cannot_move_bus(self):
+        _,u=self.future_only_forecast(); u.timestamp=self.now-181
+        self.assertTrue(self.board('RO TELLINI')['stops'][1]['vehiclesBefore'])
+
+    def test_single_downstream_forecast_cannot_skip_unreported_stops(self):
+        _,u=self.future_only_forecast(); del u.stop_time_update[1]
+        self.assertTrue(self.board('RO TELLINI')['stops'][1]['vehiclesBefore'])
+
+    def test_future_only_no_data_is_not_an_arrival_anchor(self):
+        _,u=self.future_only_forecast(); u.stop_time_update[1].schedule_relationship=pb.TripUpdate.StopTimeUpdate.NO_DATA
+        self.assertTrue(self.board('RO TELLINI')['stops'][1]['vehiclesBefore'])
 
     def test_equal_timestamp_forecast_can_resolve_next_arrival(self):
         v,_=self.rome_forecast(); v.timestamp=self.now

@@ -1,9 +1,9 @@
 import { useLineHeader } from '../lib/LineHeader';
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import React, { useEffect, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
+import { Badge, Notice, RequestState, api, clock, useData, type Route } from '../../App';
 
 type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
 type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
@@ -36,11 +36,13 @@ function BusThumbnail({ vehicle, caption, onPress }: { vehicle: Vehicle; caption
 }
 
 const positionStamp = (timestamp: number | null) => timestamp ? `Posizioni alle ${new Date(timestamp * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Nessun aggiornamento';
-const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 90 && !vehicle.retained;
+const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 90 && !vehicle.retained && (vehicle.positionSource !== 'predictions' || Boolean(vehicle.predictionTimestamp && now - vehicle.predictionTimestamp <= 180));
 export function RouteTimeline() {
   const { publish } = useLineHeader();
   const { id, variant } = useLocalSearchParams<{ id: string; variant: string }>();
   const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 30000, true);
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState('');
   const [vehicleInfo, setVehicleInfo] = useState<{ id: string; stopName: string } | null>(null);
   const [tick, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
@@ -88,6 +90,14 @@ export function RouteTimeline() {
         <Text style={s.muted}>{selected.positionSource === 'predictions' ? 'Prossima fermata da previsioni live:' : selected.retained || Boolean(state.error) || now - selected.timestamp > 90 ? 'Ultima posizione nota vicino a' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text>
         {selected.positionSource === 'predictions' && <Text style={s.small}>Prossimo arrivo previsto, non posizione GPS. Previsione alle {positionStamp(selected.predictionTimestamp || null).replace('Posizioni alle ', '')}.</Text>}
         <Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
+        <Pressable accessibilityRole="button" disabled={sharing} onPress={() => {
+          setSharing(true); setShareError('');
+          void api<unknown>(`vehicles/${encodeURIComponent(selected.vehicleId || selected.id)}/diagnostics`).then(source => Share.share({
+            title: `Dati vettura ${selected.vehicleId || ''}`,
+            message: JSON.stringify({ app: 'ATAC', line: data.route.name, direction: data.selectedVariant.headsign, displayedStop: { id: stop.stop_id, name: stop.name }, displayedVehicle: selected, source }, null, 2),
+          })).catch(() => setShareError('Impossibile leggere i dati della vettura. Aggiorna il backend e riprova.')).finally(() => setSharing(false));
+        }}><Text style={s.link}>{sharing ? 'Preparazione dati…' : 'Condividi dati della vettura'}</Text></Pressable>
+        {!!shareError && <Text accessibilityRole="alert" style={s.small}>{shareError}</Text>}
         {selected.lat !== null && selected.lon !== null && <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(`https://maps.apple.com/?ll=${selected.lat},${selected.lon}&q=Bus%20${encodeURIComponent(selected.vehicleId || data.route.name)}`); }}><Text style={s.link}>Apri rilevazione GPS in Mappe ↗</Text></Pressable>}
       </GlassSurface>}
           </View>;

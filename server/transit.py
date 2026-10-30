@@ -215,15 +215,18 @@ def route_detail(route_id, variant=None, now=None, refresh=False):
 
 def arrivals(stop_id, refresh=False):
     from .lines import variant_id
+    from .realtime_utils import stop_event_index
     now = int(time.time())
     scheduled = []
     variants = {}
+    patterns = {}
     with connect() as db:
         for epoch, active in service_windows(db, now, 7200):
             for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
                     if r["trip_id"] not in variants:
-                        stop_ids = [s[0] for s in db.execute("SELECT stop_id FROM times WHERE trip_id=? ORDER BY sequence", (r["trip_id"],))]
+                        patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT stop_id,sequence FROM times WHERE trip_id=? ORDER BY sequence", (r["trip_id"],))]
+                        stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
                     scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
     live = read_live("updates", refresh)
@@ -231,7 +234,12 @@ def arrivals(stop_id, refresh=False):
         by_trip = {}
         for e in live["feed"].entity:
             if not e.is_deleted and e.HasField("trip_update"):
-                by_trip[(e.trip_update.trip.trip_id, e.trip_update.trip.start_date)] = e.trip_update
+                update = e.trip_update
+                key = (update.trip.trip_id, update.trip.start_date)
+                stamp = int(update.timestamp or live['timestamp'] or 0)
+                previous = by_trip.get(key)
+                if 0 <= now - stamp <= 180 and (previous is None or stamp >= int(previous.timestamp or live['timestamp'] or 0)):
+                    by_trip[key] = update
         keep = []
         for item in scheduled:
             update = by_trip.get((item["tripId"], item["serviceDate"]))
@@ -245,7 +253,8 @@ def arrivals(stop_id, refresh=False):
                     continue
                 skipped = False
                 for event in update.stop_time_update:
-                    if (event.stop_sequence != item["stopSequence"] if event.HasField("stop_sequence") else event.stop_id != stop_id):
+                    index = stop_event_index(event, patterns[item['tripId']])
+                    if index is None or patterns[item['tripId']][index]['sequence'] != item['stopSequence']:
                         continue
                     if event.schedule_relationship == gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.SKIPPED:
                         skipped = True
@@ -264,8 +273,10 @@ def arrivals(stop_id, refresh=False):
                     break
                 if skipped:
                     continue
-                if item["kind"] == "live" and update.HasField("vehicle"):
-                    item["vehicleId"] = update.vehicle.label.strip() or None
+                if item["kind"] == "live":
+                    item['predictionTimestamp'] = int(update.timestamp or live['timestamp'] or 0)
+                    if update.HasField('vehicle'):
+                        item['vehicleId'] = update.vehicle.label.strip() or None
             keep.append(item)
         scheduled = keep
     scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
@@ -290,6 +301,13 @@ def arrivals(stop_id, refresh=False):
             numbers = {number for route, number in candidates if not route or route == item["routeId"]}
             if len(numbers) == 1:
                 item["vehicleId"] = numbers.pop()
+    unique = {}
+    for item in scheduled:
+        key = (item['routeId'], item['tripId'], item['serviceDate'], item['stopSequence'])
+        previous = unique.get(key)
+        if previous is None or (item['kind'] == 'live', item.get('predictionTimestamp', 0)) > (previous['kind'] == 'live', previous.get('predictionTimestamp', 0)):
+            unique[key] = item
+    scheduled = sorted(unique.values(), key=lambda item: (item['kind'] != 'live', item['time']))
     return {"apiVersion": 2, "arrivals": scheduled,
             "liveAvailable": live["available"], "timestamp": live["timestamp"]}
 

@@ -26,6 +26,9 @@ class Handler(BaseHTTPRequestHandler):
                 result = transit.stops(query("q")) if len(query("q")) >= 2 else []
             elif len(parts) == 4 and parts[:2] == ["api", "stops"] and parts[3] == "arrivals":
                 result = transit.arrivals(parts[2], **refresh_options)
+            elif len(parts) == 4 and parts[:2] == ['api', 'vehicles'] and parts[3] == 'diagnostics':
+                from .diagnostics import vehicle_diagnostics
+                result = vehicle_diagnostics(parts[2], **refresh_options)
             elif parts == ["api", "plan"]:
                 result = transit.plan(query("from"), query("to"))
             else:

@@ -81,7 +81,7 @@ class StopArrivalsTests(unittest.TestCase):
         f=self.feed(); e=f.entity.add(); e.id='loop'; e.trip_update.trip.trip_id='loop'
         event=e.trip_update.stop_time_update.add(); event.stop_id='b'; event.stop_sequence=20; event.arrival.time=self.now+1500
         result=[a for a in t.arrivals('b')['arrivals'] if a['tripId']=='loop']
-        self.assertEqual([(a['time']-self.now,a['kind']) for a in result],[(300,'scheduled'),(1500,'live')])
+        self.assertEqual([(a['time']-self.now,a['kind']) for a in result],[(1500,'live'),(300,'scheduled')])
 
     def test_arrival_links_to_matching_route_and_direction(self):
         items=t.arrivals('b')['arrivals']
@@ -111,6 +111,35 @@ class StopArrivalsTests(unittest.TestCase):
                 self.assertEqual(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'],'5678')
             v.timestamp=self.now-91
             self.assertIsNone(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['vehicleId'])
+
+    def test_live_arrival_precedes_earlier_programmed_arrival(self):
+        f=self.feed(); e=f.entity.add(); e.id='live'; u=e.trip_update; u.trip.trip_id='t2'; u.timestamp=self.now
+        event=u.stop_time_update.add(); event.stop_sequence=1; event.arrival.delay=600
+        result=t.arrivals('b')['arrivals']
+        self.assertEqual([a['kind'] for a in result],['live','scheduled'])
+        self.assertGreater(result[0]['time'],result[1]['time'])
+
+    def test_delayed_live_replaces_schedule_for_same_trip_instance(self):
+        f=self.feed(); e=f.entity.add(); e.id='live'; u=e.trip_update; u.trip.trip_id='t1'; u.timestamp=self.now
+        event=u.stop_time_update.add(); event.stop_sequence=20; event.arrival.delay=300
+        rows=[a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1']
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['kind'],'live')
+        self.assertEqual(rows[0]['time']-rows[0]['scheduledTime'],300)
+
+    def test_stop_id_agrees_with_board_when_counter_conflicts(self):
+        f=self.feed(); e=f.entity.add(); e.id='live'; u=e.trip_update; u.trip.trip_id='t1'; u.timestamp=self.now
+        event=u.stop_time_update.add(); event.stop_sequence=10; event.stop_id='b'; event.arrival.delay=60
+        item=next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')
+        self.assertEqual(item['kind'],'live')
+        self.assertEqual(item['time'],self.now+660)
+
+    def test_older_duplicate_update_does_not_overwrite_newer(self):
+        f=self.feed()
+        for name,age,delay in [('new',0,300),('old',30,60)]:
+            e=f.entity.add(); e.id=name; u=e.trip_update; u.trip.trip_id='t1'; u.timestamp=self.now-age
+            event=u.stop_time_update.add(); event.stop_sequence=20; event.arrival.delay=delay
+        self.assertEqual(next(a for a in t.arrivals('b')['arrivals'] if a['tripId']=='t1')['time'],self.now+900)
 
     def test_internal_identifiers_are_not_public_fleet_numbers(self):
         f=self.feed(); e=f.entity.add(); e.id='entity-123'

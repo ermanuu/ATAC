@@ -212,7 +212,7 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
                 index = nearest
                 estimated = True
                 source = 'gps'
-        forecast = next_arrival(vehicle, group['trips'].get(trip_id), actual_stops or [], reference_index, timestamp, now, updates, windows)
+        forecast = next_arrival(vehicle, group['trips'].get(trip_id), actual_stops or [], reference_index, now, updates, windows)
         prediction_timestamp = None
         if forecast and (index is None or forecast[0] > index):
             index, prediction_timestamp = forecast
