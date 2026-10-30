@@ -1,6 +1,6 @@
 # Prova su iPhone con un PC Windows
 
-Non serve un account Apple Developer a pagamento. Il progetto usa Expo SDK 57 e moduli inclusi in Expo Go, come indicato dalla documentazione Expo durante la transizione a SDK 58.
+Non serve un account Apple Developer a pagamento. Il progetto usa Expo SDK 58 e moduli inclusi in Expo Go. La versione SDK deve coincidere con quella supportata dall’app Expo Go installata sull’iPhone.
 
 ## 1. Installa gli strumenti
 
@@ -75,3 +75,17 @@ Se i feed live non sono raggiungibili, l’app lo indica; senza GTFS importato l
 ## Stato delle verifiche
 
 TypeScript, lint, test del backend e bundle JavaScript iOS sono verificabili nel cloud. L’esecuzione dei comandi Windows, l’apertura su un iPhone fisico e l’accesso attuale ai feed dal PC devono ancora essere verificati: questo documento non li dichiara già riusciti. Non è un’installazione permanente o una pubblicazione su App Store: l’app gira dentro Expo Go mentre il PC fornisce codice e dati.
+
+## Se Expo Go segnala SDK 58 ma il progetto usa SDK 57
+
+Arresta Expo con Ctrl+C. Dal repository GitHub, nel browser autenticato, scarica lo ZIP aggiornato di `main`. Estrai lo ZIP in una cartella separata e copia soltanto `package.json` e `package-lock.json` nella cartella esistente `C:\ATAC`, sostituendo i due file. Mantieni il database degli orari, la correzione Python Windows e le configurazioni locali.
+
+Poi nel Prompt dei comandi, un comando alla volta:
+
+```bat
+cd /d C:\ATAC
+npm ci
+npm start -- --clear --lan
+```
+
+Mantieni `EXPO_PUBLIC_API_URL` impostato nel terminale prima di riavviare. Lascia il backend aperto nell’altra finestra. Se un comando termina con errore, fermati e conserva il messaggio. Non usare `--force` o `--legacy-peer-deps`. La sostituzione del lockfile evita conflitti con vecchie risoluzioni delle dipendenze SDK 57. Dopo l’aggiornamento, scansiona il nuovo QR con Expo Go per SDK 58.
