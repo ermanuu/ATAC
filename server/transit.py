@@ -154,7 +154,7 @@ class Realtime:
         with self.lock:
             cached = self.cache.get(kind)
             now = time.time()
-            ttl = 10 if kind == "vehicles" else 30
+            ttl = 10
             if not force and cached and now - cached[0] < ttl:
                 value = cached[1]
                 if not value["available"] or -60 <= now - value["timestamp"] <= 180:
@@ -280,7 +280,7 @@ def arrivals(stop_id, refresh=False):
             keep.append(item)
         scheduled = keep
     scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
-    if any(i["kind"] == "live" and not i["vehicleId"] for i in scheduled):
+    if any(i["kind"] == "live" for i in scheduled):
         positions = read_live("vehicles", refresh)
         assignments = {}
         assignment_now = int(time.time())
@@ -293,13 +293,20 @@ def arrivals(stop_id, refresh=False):
                 number = vehicle.vehicle.label.strip()
                 if number and entity.id not in positions.get("retained", ()) and 0 <= assignment_now - stamp <= 90:
                     key = (vehicle.trip.trip_id, vehicle.trip.start_date)
-                    assignments.setdefault(key, []).append((vehicle.trip.route_id, number))
+                    pattern = patterns.get(vehicle.trip.trip_id, [])
+                    first = pattern[0] if pattern else None
+                    at_terminal = bool(first and vehicle.current_status == gtfs_realtime_pb2.VehiclePosition.STOPPED_AT and (
+                        vehicle.stop_id == first['stop_id'] if vehicle.stop_id else
+                        vehicle.HasField('current_stop_sequence') and vehicle.current_stop_sequence == first['sequence']))
+                    assignments.setdefault(key, []).append((vehicle.trip.route_id, number, at_terminal))
         for item in scheduled:
-            if item["kind"] != "live" or item["vehicleId"]:
+            if item["kind"] != "live":
                 continue
             candidates = assignments.get((item["tripId"], item["serviceDate"]), assignments.get((item["tripId"], ""), []))
-            numbers = {number for route, number in candidates if not route or route == item["routeId"]}
-            if len(numbers) == 1:
+            numbers = {number for route, number, _ in candidates if not route or route == item["routeId"]}
+            matching = [terminal for route, number, terminal in candidates if (not route or route == item['routeId']) and (not item['vehicleId'] or number == item['vehicleId'])]
+            item['atTerminus'] = bool(matching and all(matching))
+            if not item["vehicleId"] and len(numbers) == 1:
                 item["vehicleId"] = numbers.pop()
     unique = {}
     for item in scheduled:

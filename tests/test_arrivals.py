@@ -26,6 +26,28 @@ class StopArrivalsTests(unittest.TestCase):
         self.live={'available':True,'timestamp':self.now,'feed':f}
         return f
 
+    def test_live_arrival_marks_only_fresh_vehicle_stopped_at_origin(self):
+        feed = self.feed()
+        update = feed.entity.add(); update.id = 'update'
+        update.trip_update.trip.trip_id = 't1'
+        update.trip_update.vehicle.label = '1234'
+        event = update.trip_update.stop_time_update.add()
+        event.stop_id = 'b'; event.arrival.time = self.now + 600
+        entity = feed.entity.add(); entity.id = 'bus'
+        vehicle = entity.vehicle
+        vehicle.trip.trip_id = 't1'; vehicle.vehicle.label = '1234'
+        vehicle.timestamp = self.now; vehicle.stop_id = 'a'
+        vehicle.current_status = pb.VehiclePosition.STOPPED_AT
+        def item():
+            return next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertTrue(item()['atTerminus'])
+        vehicle.stop_id = 'b'
+        self.assertFalse(item()['atTerminus'])
+        vehicle.stop_id = 'a'; vehicle.current_status = pb.VehiclePosition.IN_TRANSIT_TO
+        self.assertFalse(item()['atTerminus'])
+        vehicle.current_status = pb.VehiclePosition.STOPPED_AT; vehicle.timestamp = self.now - 91
+        self.assertFalse(item()['atTerminus'])
+
     def test_stop_returns_all_lines_not_just_selected_line(self):
         arrivals=t.arrivals('b')['arrivals']
         self.assertEqual({a['line'] for a in arrivals},{'64','40'})

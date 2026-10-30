@@ -223,7 +223,7 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
             continue
         stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
         placement = placement_override or ('at' if stopped or estimated else 'before')
-        item = {'id': vehicle.vehicle.id or entity.id, 'vehicleId': vehicle.vehicle.label.strip() or None, 'timestamp': timestamp,
+        item = {'tripId': trip_id, 'serviceDate': vehicle.trip.start_date, 'id': vehicle.vehicle.id or entity.id, 'vehicleId': vehicle.vehicle.label.strip() or None, 'timestamp': timestamp,
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
                 'estimated': estimated, 'placement': placement, 'positionSource': source,
                 'predictionTimestamp': prediction_timestamp, 'referenceStopId': vehicle.stop_id or None,

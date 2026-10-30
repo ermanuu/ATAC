@@ -1,4 +1,4 @@
-export type Arrival = { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; line: string; headsign: string; time: number; scheduledTime?: number; kind: string; serviceDate?: string; stopSequence?: number; predictionTimestamp?: number };
+export type Arrival = { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; atTerminus?: boolean; line: string; headsign: string; time: number; scheduledTime?: number; kind: string; serviceDate?: string; stopSequence?: number; predictionTimestamp?: number };
 const direction = (a: Arrival) => JSON.stringify([a.line.trim().toLocaleUpperCase('it-IT'), a.headsign.trim().replace(/\s+/g, ' ').toLocaleUpperCase('it-IT'), a.serviceDate || '']);
 /** Live is authoritative for a direction; schedules are its fallback. */
 export function prioritizeArrivals(arrivals: Arrival[]) {

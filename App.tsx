@@ -138,7 +138,7 @@ function AppShell() {
   </SafeAreaView></View></GlassProvider>;
 }
 export function Home() {
-  const state = useData<Health>('status', 30000);
+  const state = useData<Health>('status', 10000);
   const live = state.data?.vehicles.available && state.data?.updates.available;
   return <View style={s.home}>
     <View style={s.homeHeader}>
@@ -217,7 +217,7 @@ export function Stops() {
   useEffect(() => {
     if (params.stopId && params.stopName) setStop({ stop_id: params.stopId, name: params.stopName });
   }, [params.stopId, params.stopName]);
-  const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 30000, true);
+  const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 10000, true);
   const [tick, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
@@ -263,8 +263,8 @@ export function Stops() {
       <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={s.route} onPress={() => { void openArrival(a); }}>
-        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Previsione live · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
-        <View style={s.arrivalTime}><Text style={[s.time, a.kind === 'live' && s.liveEta]}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.liveEta]}>{clock(a.time)} ›</Text></View>
+        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Live${a.atTerminus ? ' · al capolinea' : ''} · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
+        <View style={s.arrivalTime}><Text style={[s.time, a.kind === 'live' && s.liveEta]}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.expectedClock]}>{clock(a.time)} ›</Text></View>
       </GlassPressable>)}
     </>}
   </View>;
@@ -311,6 +311,7 @@ const s = StyleSheet.create({
   bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: 'rgba(150,0,45,0.085)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.9)' }, bottomTabPressed: { backgroundColor: 'rgba(150,0,45,0.12)' }, bottomTabText: { color: '#536373', fontSize: 11, fontWeight: '600' }, bottomTabSelected: { color: '#96002d', fontWeight: '800' },
   content: { flex: 1, paddingHorizontal: 20 }, scroll: { paddingBottom: 140, gap: 14 }, heading: { color: '#202d3a', fontSize: 20, fontWeight: '700', flexShrink: 1 },
   muted: { color: '#596878', fontSize: 14, lineHeight: 21 }, small: { color: '#596878', fontSize: 11, lineHeight: 16 }, body: { color: '#202d3a', fontSize: 16, fontWeight: '600' },
+  expectedClock: { color: '#167450', fontWeight: '800', backgroundColor: '#e2f3e9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   input: { ...glassStyle, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 16, color: '#202d3a', fontSize: 16, marginVertical: 12 },
   route: { padding: 16, flexDirection: 'row', gap: 14, alignItems: 'center' },
   badge: { minWidth: 52, borderRadius: 18, padding: 12, backgroundColor: 'rgba(150,0,45,0.10)', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(150,0,45,0.08)' }, badgeText: { color: '#96002d', fontSize: 18, fontWeight: '800' },
