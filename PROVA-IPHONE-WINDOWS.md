@@ -66,7 +66,7 @@ Mantieni entrambe le finestre aperte durante la prova. `localhost` e `127.0.0.1`
 
 ## 6. Cosa provare
 
-- **Linee**: cerca una linea, apri il percorso e controlla le posizioni dei bus quando presenti.
+- **Linee**: cerca una linea, scegli la direzione e consulta le partenze dal capolinea (−10 / +60 minuti). Nell’elenco fermate, le miniature a sinistra indicano i bus fermi o in arrivo; toccale per i dettagli, oppure tocca una fermata per gli arrivi.
 - **Fermate**: cerca una fermata; distingue le previsioni live dagli orari programmati.
 - **Percorso**: seleziona due fermate e calcola un itinerario solo autobus. Il calcolo usa gli orari programmati, non il traffico live.
 
@@ -89,3 +89,9 @@ npm start -- --clear --lan
 ```
 
 Mantieni `EXPO_PUBLIC_API_URL` impostato nel terminale prima di riavviare. Lascia il backend aperto nell’altra finestra. Se un comando termina con errore, fermati e conserva il messaggio. Non usare `--force` o `--legacy-peer-deps`. La sostituzione del lockfile evita conflitti con vecchie risoluzioni delle dipendenze SDK 57. Dopo l’aggiornamento, scansiona il nuovo QR con Expo Go per SDK 58.
+
+## Aggiornamento della sezione Linee
+
+Arresta backend ed Expo con Ctrl+C nelle rispettive finestre. Scarica dal browser autenticato lo ZIP aggiornato di GitHub ed estrailo in una cartella separata. Copia `App.tsx`, la cartella `src` e i file della cartella `server` dentro `C:\ATAC`, unendo le cartelle e sostituendo i file. Conserva `server\data`, `.venv` e le impostazioni locali. Non è necessaria una nuova importazione degli orari per questo aggiornamento.
+
+Riavvia il backend nella prima finestra con `set API_HOST=0.0.0.0` e `npm run api`. Nella seconda mantieni `EXPO_PUBLIC_API_URL` con l’indirizzo del PC e avvia `npm start -- --clear --lan`, poi scansiona il nuovo QR. Occorre aggiornare sia il backend sia l’app: il nuovo elenco di direzioni usa l’API aggiornata.

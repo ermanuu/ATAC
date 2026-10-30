@@ -1,15 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { Slot, router, usePathname } from 'expo-router';
+import { Slot, router, usePathname, useLocalSearchParams } from 'expo-router';
 
 const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
-type Stop = { stop_id: string; name: string };
-type Route = { route_id: string; name: string; description: string };
+export type Stop = { stop_id: string; name: string };
+export type Route = { route_id: string; name: string; description: string };
 type Live = { available: boolean; timestamp: number | null };
 type Health = { staticAvailable: boolean; serviceToday?: boolean; vehicles: Live; updates: Live };
-type Detail = { variants: { headsign: string; direction: string; stops: Stop[] }[]; vehicles: { id: string; lat: number; lon: number; timestamp: number; stopId: string; status: string }[]; liveAvailable: boolean; timestamp: number | null };
 type Arrivals = { arrivals: { tripId: string; line: string; headsign: string; time: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
 type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
 async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -19,16 +18,16 @@ async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   if (!response.ok) throw new Error(body.error || 'Servizio non disponibile');
   return body;
 }
-const clock = (t: number) => new Date(t * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' });
-const stamp = (t: number | null) => t ? `Aggiornato alle ${clock(t)}` : 'Nessun aggiornamento disponibile';
-function Button({ text, onPress, disabled = false }: { text: string; onPress: () => void; disabled?: boolean }) {
+export const clock = (t: number) => new Date(t * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' });
+export const stamp = (t: number | null) => t ? `Aggiornato alle ${clock(t)}` : 'Nessun aggiornamento disponibile';
+export function Button({ text, onPress, disabled = false }: { text: string; onPress: () => void; disabled?: boolean }) {
   return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[s.button, disabled && { opacity: 0.4 }]}><Text style={s.buttonText}>{text}</Text></Pressable>;
 }
-function Notice({ text }: { text: string }) { return <View accessibilityRole="alert" style={s.notice}><Text style={s.muted}>{text}</Text></View>; }
-function Badge({ name }: { name: string }) { return <View style={s.badge}><Text style={s.badgeText}>{name}</Text></View>; }
+export function Notice({ text }: { text: string }) { return <View accessibilityRole="alert" style={s.notice}><Text style={s.muted}>{text}</Text></View>; }
+export function Badge({ name }: { name: string }) { return <View style={s.badge}><Text style={s.badgeText}>{name}</Text></View>; }
 
-// Abort obsolete requests and clear live values during refresh: stale data never retains a live label.
-function useData<T>(path: string | null, interval = 0) {
+// Abort obsolete requests. Retained line boards check vehicle freshness separately.
+export function useData<T>(path: string | null, interval = 0, retainWhileLoading = false) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,18 +38,19 @@ function useData<T>(path: string | null, interval = 0) {
     let controller: AbortController | undefined;
     const load = () => {
       controller?.abort(); controller = new AbortController(); const signal = controller.signal;
-      setData(null); setError(''); setLoading(true);
-      api<T>(path, signal).then(setData).catch(e => { if (!signal.aborted) setError(e.message); })
+      if (!retainWhileLoading) setData(null);
+      setError(''); setLoading(true);
+      api<T>(path, signal).then(value => { if (!signal.aborted) setData(value); }).catch(e => { if (!signal.aborted) { setData(null); setError(e.message); } })
         .finally(() => { if (!signal.aborted) setLoading(false); });
     };
     const delay = setTimeout(load, 250);
     const timer = interval ? setInterval(load, interval) : undefined;
     const listener = AppState.addEventListener('change', state => { if (state === 'active') load(); });
     return () => { controller?.abort(); clearTimeout(delay); if (timer) clearInterval(timer); listener.remove(); };
-  }, [path, interval, revision]);
+  }, [path, interval, revision, retainWhileLoading]);
   return { data, error, loading, retry: () => setRevision(n => n + 1) };
 }
-function RequestState({ state }: { state: { loading: boolean; error: string; retry: () => void } }) {
+export function RequestState({ state }: { state: { loading: boolean; error: string; retry: () => void } }) {
   return <>{state.loading && <ActivityIndicator color="#a01d35" />}{!!state.error && <><Notice text={state.error} /><Button text="Riprova" onPress={state.retry} /></>}</>;
 }
 function StopSearch({ label, selected, onSelect }: { label: string; selected: Stop | null; onSelect: (stop: Stop | null) => void }) {
@@ -82,24 +82,18 @@ export default function App() {
 }
 export function Lines() {
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<Route | null>(null);
-  const state = useData<Route[]>(selected ? null : `routes?q=${encodeURIComponent(query)}`);
-  const detail = useData<Detail>(selected ? `routes/${encodeURIComponent(selected.route_id)}` : null, 30000);
-  if (selected) return <View style={s.stack}><Button text="‹ Tutte le linee" onPress={() => setSelected(null)} /><View style={s.row}><Badge name={selected.name} /><Text style={s.heading}>Percorso della linea</Text></View><RequestState state={detail} />
-    {detail.data && <><Text style={s.heading}>Bus in servizio</Text><Text style={s.muted}>{detail.data.liveAvailable ? stamp(detail.data.timestamp) : 'Posizioni live non disponibili'}</Text>
-      {detail.data.liveAvailable && !detail.data.vehicles.length && <Notice text="Nessun veicolo segnalato per questa linea. Non indica necessariamente assenza di servizio." />}
-      {detail.data.vehicles.map(v => <View key={v.id} style={s.card}><Text style={s.body}>Bus {v.id}</Text><Text style={s.muted}>{v.status === 'STOPPED_AT' ? 'Fermo alla fermata' : v.status === 'INCOMING_AT' ? 'In avvicinamento' : 'In viaggio'} {v.stopId} · {clock(v.timestamp)}</Text><Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(`https://maps.apple.com/?ll=${v.lat},${v.lon}&q=Bus%20${encodeURIComponent(selected.name)}`); }}><Text style={s.link}>Apri posizione in Mappe ↗</Text></Pressable></View>)}
-      {!detail.data.variants.length && <Notice text="Nessun percorso programmato attivo oggi nel GTFS importato." />}
-      {detail.data.variants.map((v,i) => <View key={i} style={s.card}><Text style={s.heading}>→ {v.headsign || `Direzione ${v.direction || i+1}`}</Text><Text style={s.muted}>Sequenza programmata · varianti e deviazioni live non incluse</Text>{v.stops.map((stop,j) => <View key={`${stop.stop_id}-${j}`} style={s.row}><Text style={s.link}>●</Text><View style={s.flex}><Text style={s.body}>{stop.name}</Text><Text style={s.small}>{stop.stop_id}</Text></View></View>)}</View>)}
-    </>}
-  </View>;
-  return <View style={s.stack}><Text style={s.heading}>Trova il tuo autobus</Text><Text style={s.muted}>Cerca il numero o il nome della linea</Text><TextInput accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor="#738197" style={s.input} autoCorrect={false} /><RequestState state={state} />
+  const state = useData<Route[]>(`routes?q=${encodeURIComponent(query)}`);
+  return <View style={s.stack}><Text style={s.heading}>Trova il tuo autobus</Text><Text style={s.muted}>Cerca la linea, poi scegli la direzione</Text><TextInput accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor="#738197" style={s.input} autoCorrect={false} /><RequestState state={state} />
     {state.data?.length === 0 && <Notice text="Nessuna linea trovata." />}
-    {state.data?.map(r => <Pressable accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => setSelected(r)}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>{r.description || `Linea ${r.name}`}</Text><Text style={s.small}>Percorso e posizioni live</Text></View><Text style={s.arrow}>›</Text></Pressable>)}
+    {state.data?.map(r => <Pressable accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => router.push({ pathname: '/line/[id]', params: { id: r.route_id } })}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>{r.description || `Linea ${r.name}`}</Text><Text style={s.small}>Scegli la direzione →</Text></View><Text style={s.arrow}>›</Text></Pressable>)}
   </View>;
 }
 export function Stops() {
-  const [stop, setStop] = useState<Stop | null>(null);
+  const params = useLocalSearchParams<{ stopId?: string; stopName?: string }>();
+  const [stop, setStop] = useState<Stop | null>(() => params.stopId && params.stopName ? { stop_id: params.stopId, name: params.stopName } : null);
+  useEffect(() => {
+    if (params.stopId && params.stopName) setStop({ stop_id: params.stopId, name: params.stopName });
+  }, [params.stopId, params.stopName]);
   const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 30000);
   return <View style={s.stack}><Text style={s.heading}>Alla fermata</Text><Text style={s.muted}>Arrivi previsti e orari programmati</Text><StopSearch label="Fermata" selected={stop} onSelect={setStop} /><RequestState state={state} />
     {state.data && <><Text style={s.muted}>{state.data.liveAvailable ? stamp(state.data.timestamp) : 'Feed live non disponibile · solo orari programmati'}</Text>

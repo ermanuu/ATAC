@@ -196,34 +196,9 @@ def stops(query):
         return [dict(r) for r in db.execute("SELECT * FROM stops WHERE name LIKE ? OR stop_id=? ORDER BY name LIMIT 30", (f"%{query}%", query))]
 
 
-def route_detail(route_id):
-    with connect() as db:
-        variants = []
-        # Select one stop pattern per direction/headsign; only currently active service.
-        active = active_services(db, datetime.now(ROME).date())
-        seen = set()
-        for trip in db.execute("SELECT * FROM trips WHERE route_id=? ORDER BY direction,headsign,trip_id", (route_id,)):
-            key = (trip["direction"], trip["headsign"])
-            if trip["service_id"] not in active or key in seen:
-                continue
-            seen.add(key)
-            sequence = [dict(r) for r in db.execute("SELECT s.*,t.sequence FROM times t JOIN stops s ON s.stop_id=t.stop_id WHERE trip_id=? ORDER BY sequence", (trip["trip_id"],))]
-            variants.append({"headsign": trip["headsign"], "direction": trip["direction"], "stops": sequence})
-    live = realtime.read("vehicles")
-    vehicles = []
-    if live["available"]:
-        with connect() as db:
-            trip_routes = dict(db.execute("SELECT trip_id,route_id FROM trips"))
-        for entity in live["feed"].entity:
-            if entity.is_deleted or not entity.HasField("vehicle"):
-                continue
-            v = entity.vehicle
-            timestamp = int(v.timestamp or live["timestamp"])
-            actual_route = v.trip.route_id or trip_routes.get(v.trip.trip_id)
-            if actual_route == route_id and v.HasField("position") and 0 <= time.time() - timestamp <= 180:
-                vehicles.append({"id": v.vehicle.id or entity.id, "lat": v.position.latitude, "lon": v.position.longitude,
-                                 "timestamp": timestamp, "stopId": v.stop_id, "status": gtfs_realtime_pb2.VehiclePosition.VehicleStopStatus.Name(v.current_status)})
-    return {"variants": variants, "vehicles": vehicles, "liveAvailable": live["available"], "timestamp": live["timestamp"]}
+def route_detail(route_id, variant=None, now=None):
+    from .lines import line_detail
+    return line_detail(route_id, variant, now)
 
 
 def arrivals(stop_id):

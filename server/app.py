@@ -20,7 +20,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parts == ["api", "routes"]:
                 result = transit.routes(query("q"))
             elif len(parts) == 3 and parts[:2] == ["api", "routes"]:
-                result = transit.route_detail(parts[2])
+                result = transit.route_detail(parts[2], query("variant") or None)
             elif parts == ["api", "stops"]:
                 result = transit.stops(query("q")) if len(query("q")) >= 2 else []
             elif len(parts) == 4 and parts[:2] == ["api", "stops"] and parts[3] == "arrivals":

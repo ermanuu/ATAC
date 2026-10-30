@@ -6,8 +6,8 @@ Per provarla gratuitamente da Windows su iPhone, segui [la guida passo passo](PR
 
 ## Funzionalità
 
-- Ricerca delle linee autobus e sequenza delle fermate per direzione/capolinea attivi oggi.
-- Posizioni dei bus dal feed GTFS Realtime, con orario di aggiornamento e apertura in Mappe di Apple.
+- Ricerca delle linee autobus, scelta della direzione e delle varianti di percorso, partenze dal capolinea da 10 minuti fa a un’ora avanti ed elenco delle fermate.
+- Miniature dei bus a sinistra delle fermate: alla fermata se fermi, nel tratto precedente se in arrivo. Posizioni dal feed GTFS Realtime, dettaglio veicolo e apertura in Mappe di Apple; eventuali associazioni GPS approssimate sono marcate con ≈.
 - Ricerca fermate e prossime partenze: previsioni live quando presenti, altrimenti orari esplicitamente programmati. Corse cancellate e fermate saltate vengono escluse.
 - Calcolo dell’itinerario fra due fermate usando orari GTFS e calendario effettivo, con cambi e corse oltre mezzanotte.
 - Nessun dato dimostrativo nell’app. Feed indisponibili o scaduti producono stati espliciti, senza simulare il servizio.
@@ -69,6 +69,6 @@ Se il servizio metadati Expo non è accessibile, `EXPO_OFFLINE=1` consente alla 
 
 ## Limiti della prima versione
 
-Il calcolo è solo autobus, fra fermate selezionate, con cambi alla stessa fermata e margine di 2 minuti; considera partenze nelle prossime 4 ore. Non include indirizzi, cammino, metropolitana, accessibilità, frequenze non basate su orari o ottimizzazione del percorso in base al traffico. I tempi live sono visibili alle fermate ma non ricalcolano gli itinerari. I percorsi di linea mostrano una corsa rappresentativa per direzione/capolinea, non tutte le varianti. Alert e deviazioni non sono ancora integrati.
+Il calcolo è solo autobus, fra fermate selezionate, con cambi alla stessa fermata e margine di 2 minuti; considera partenze nelle prossime 4 ore. Non include indirizzi, cammino, metropolitana, accessibilità, frequenze non basate su orari o ottimizzazione del percorso in base al traffico. I tempi live sono visibili alle fermate ma non ricalcolano gli itinerari. Le direzioni con sequenze di fermate diverse sono scelte separate. Le miniature sono collocate tramite corsa e sequenza/ID della fermata; se questi riferimenti mancano, solo i bus di una direzione non ambigua possono essere associati al percorso. Per le corse note, il GPS può indicare approssimativamente la fermata più vicina entro 500 metri; le posizioni ambigue o troppo distanti non sono collocate. Alert e deviazioni non sono ancora integrati.
 
 I feed live vengono letti su richiesta con cache di 30 secondi. Feed e singole posizioni più vecchi di 180 secondi non sono presentati come live. È necessario validare questi criteri contro il feed effettivo. L’API HTTP inclusa è un server di sviluppo, non un deployment di produzione.
