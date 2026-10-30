@@ -30,7 +30,8 @@
     "test:server": "node scripts/backend.mjs -m unittest discover -s tests -v",
     "api": "node scripts/backend.mjs -m server.app",
     "data:import": "node scripts/backend.mjs -m server.import_gtfs",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:client": "node tests/resolve-arrival.test.mjs"
   },
   "private": true
 }

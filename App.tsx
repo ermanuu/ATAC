@@ -1,3 +1,4 @@
+import { resolveArrivalDestination } from './src/lib/resolveArrival';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,7 +8,8 @@ import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams 
 const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 export type Stop = { stop_id: string; name: string };
 export type Route = { route_id: string; name: string; description: string };
-type Arrivals = { arrivals: { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; line: string; headsign: string; time: number; scheduledTime?: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
+type Health = { vehicles: { available: boolean }; updates: { available: boolean } };
+type Arrivals = { apiVersion?: number; arrivals: { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; line: string; headsign: string; time: number; scheduledTime?: number; kind: string }[]; liveAvailable: boolean; timestamp: number | null };
 type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
 async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   if (!API) throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
@@ -82,10 +84,10 @@ export default function App() {
   return <SafeAreaView style={s.safe}><StatusBar style="dark" />
     {!home && !lineDetail && !stopDetail && <View style={s.tabs}>{([['lines', 'Linee'], ['stops', 'Fermate'], ['plan', 'Percorso']] as const).map(([key, label]) => <Pressable accessibilityRole="tab" accessibilityState={{ selected: key === tab }} key={key} onPress={() => router.replace(key === 'lines' ? '/lines' : key === 'stops' ? '/stops' : '/plan')} style={[s.tab, key === tab && s.active]}><Text style={[s.tabText, key === tab && { color: '#a01d35' }]}>{label}</Text></Pressable>)}</View>}
     {(lineDetail || stopDetail) && <View style={s.fixedHeader}>
-      {lineDetail && params.id && params.variant ? <Pressable accessibilityRole="button" accessibilityLabel="Cambia direzione" style={s.headerAction} onPress={() => router.replace({ pathname: '/line/[id]', params: { id: params.id! } })}><Text style={s.headerActionText}>Direzione</Text></Pressable> : <View style={s.flex} />}
       <Pressable accessibilityRole="button" accessibilityLabel={lineDetail ? 'Torna a cerca linea' : params.fromRouteId && params.fromVariant ? 'Torna alla linea' : 'Torna a cerca fermata'} style={[s.headerAction, s.headerReturn]} onPress={lineDetail ? returnToSearch : returnFromStop}>
         <Text numberOfLines={1} style={s.headerActionText}>{lineDetail ? '← Cerca linea' : params.fromRouteId && params.fromVariant ? `← Torna alla linea ${params.fromLine || ''}` : '← Cerca fermata'}</Text>
       </Pressable>
+      {lineDetail && params.id && params.variant && <Pressable accessibilityRole="button" accessibilityLabel="Cambia direzione" style={s.headerAction} onPress={() => router.replace({ pathname: '/line/[id]', params: { id: params.id! } })}><Text style={s.headerActionText}>Direzione</Text></Pressable>}
     </View>}
     <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : s.scroll}>
       <Slot />
@@ -93,15 +95,24 @@ export default function App() {
   </SafeAreaView>;
 }
 export function Home() {
+  const state = useData<Health>('status', 30000);
+  const live = state.data?.vehicles.available && state.data?.updates.available;
   return <View style={s.home}>
-    <Button text="Cerca linea" onPress={() => router.push('/lines')} />
-    <Button text="Cerca fermata" onPress={() => router.push('/stops')} />
-    <Button text="Calcola percorso" onPress={() => router.push('/plan')} />
+    <View style={s.homeHeader}>
+      <View style={s.row}><Text style={s.eyebrow}>ROMA · AUTOBUS</Text><Text style={[s.small, { color: live ? '#167450' : '#9b6a20' }]}>{live ? '● Feed live' : state.loading ? 'Verifica live…' : '● Live non disponibile'}</Text></View>
+      <Text style={s.homeTitle}>La città, in movimento.</Text>
+      <Text style={s.homeSubtitle}>Linee, fermate e percorsi a Roma</Text>
+    </View>
+    <View style={s.homeActions}>
+      <Button text="Cerca linea" onPress={() => router.push('/lines')} />
+      <Button text="Cerca fermata" onPress={() => router.push('/stops')} />
+      <Button text="Calcola percorso" onPress={() => router.push('/plan')} />
+    </View>
   </View>;
 }
 export function Lines() {
-  const { focus } = useLocalSearchParams<{ focus?: string }>();
-  const [query, setQuery] = useState('');
+  const { focus, query: initialQuery } = useLocalSearchParams<{ focus?: string; query?: string }>();
+  const [query, setQuery] = useState(initialQuery || '');
   const state = useData<Route[]>(`routes?q=${encodeURIComponent(query)}`);
   return <View style={s.stack}><TextInput autoFocus={focus === '1'} accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor="#738197" style={s.input} autoCorrect={false} /><RequestState state={state} />
     {state.data?.length === 0 && <Notice text="Nessuna linea trovata." />}
@@ -120,6 +131,23 @@ export function Stops() {
     const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
     return () => clearInterval(timer);
   }, []);
+  const navigation = useRef<AbortController | null>(null);
+  const [openingRoute, setOpeningRoute] = useState<string | null>(null);
+  const [navigationError, setNavigationError] = useState('');
+  useEffect(() => () => navigation.current?.abort(), []);
+  const openArrival = async (arrival: Arrivals['arrivals'][number]) => {
+    navigation.current?.abort();
+    const controller = new AbortController(); navigation.current = controller;
+    setOpeningRoute(arrival.tripId); setNavigationError('');
+    try {
+      const destination = await resolveArrivalDestination(arrival, api, controller.signal);
+      if (!controller.signal.aborted) router.push(destination);
+    } catch (error) {
+      if (!controller.signal.aborted) setNavigationError((error as Error).message);
+    } finally {
+      if (!controller.signal.aborted) setOpeningRoute(null);
+    }
+  };
   const specificStop = Boolean(params.stopId);
   const liveFresh = Boolean(state.data?.liveAvailable && state.data.timestamp && now - state.data.timestamp <= 180);
   const arrivals = (state.data?.arrivals || []).map(a => a.kind === 'live' && !liveFresh
@@ -129,17 +157,17 @@ export function Stops() {
     {specificStop && <Text style={s.muted}>Tutte le linee · prossime 2 ore</Text>}
     {specificStop && stop ? <View style={s.card}><Text style={s.heading}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></View> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
     <RequestState state={state} />
+    {openingRoute && <View style={s.row}><ActivityIndicator color="#a01d35" /><Text style={s.muted}>Apertura itinerario…</Text></View>}
+    {!!navigationError && <Notice text={navigationError} />}
+    {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
     {stop && <Button text="Aggiorna arrivi" onPress={state.retry} disabled={state.loading} />}
     {state.data && <>
       <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
       <Text style={s.label}>{arrivals.length} {arrivals.length === 1 ? 'arrivo disponibile' : 'arrivi disponibili'} per questa fermata</Text>
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
-      {arrivals.map((a,i) => <Pressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={!a.routeId} style={s.route} onPress={() => {
-        if (a.routeId && a.variantId) router.push({ pathname: '/line/[id]/[variant]', params: { id: a.routeId, variant: a.variantId } });
-        else if (a.routeId) router.push({ pathname: '/line/[id]', params: { id: a.routeId } });
-      }}>
-        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Previsione live${a.vehicleId ? ` · vettura ${a.vehicleId}` : ''}` : 'Orario programmato'}</Text></View>
-        <View style={s.arrivalTime}><Text style={s.time}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={s.small}>{clock(a.time)}{a.routeId ? ' ›' : ''}</Text></View>
+      {arrivals.map((a,i) => <Pressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={s.route} onPress={() => { void openArrival(a); }}>
+        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Previsione live · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
+        <View style={s.arrivalTime}><Text style={s.time}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={s.small}>{clock(a.time)} ›</Text></View>
       </Pressable>)}
     </>}
   </View>;
@@ -172,9 +200,9 @@ export function Planner() {
 }
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f8f6f2' },
-  fixedHeader: { minHeight: 56, paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: '#e3dfd8', marginBottom: 12 },
-  headerAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 10 }, headerReturn: { backgroundColor: '#ebe8e3', marginLeft: 'auto', maxWidth: '85%' }, headerActionText: { color: '#a01d35', fontWeight: '700', fontSize: 13 },
-  homeContent: { paddingHorizontal: 24 }, homeScroll: { flexGrow: 1 }, home: { flex: 1, justifyContent: 'center', gap: 20, width: '100%', maxWidth: 420, alignSelf: 'center', paddingVertical: 32 }, flex: { flex: 1 }, stack: { gap: 14 },
+  fixedHeader: { minHeight: 56, paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: '#e3dfd8', marginBottom: 12 },
+  headerAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 10 }, headerReturn: { backgroundColor: '#ebe8e3', maxWidth: '80%' }, headerActionText: { color: '#a01d35', fontWeight: '700', fontSize: 13 },
+  homeContent: { paddingHorizontal: 24 }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 32, width: '100%', maxWidth: 420, alignSelf: 'center', paddingVertical: 20 }, homeHeader: { gap: 8 }, homeActions: { gap: 20 }, eyebrow: { fontSize: 11, fontWeight: '800', color: '#a01d35', letterSpacing: 1.4, flex: 1 }, homeTitle: { fontSize: 34, fontWeight: '800', color: '#202d3a', marginTop: 14, letterSpacing: -1.3 }, homeSubtitle: { color: '#596878', fontSize: 16 }, flex: { flex: 1 }, stack: { gap: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   tabs: { flexDirection: 'row', marginHorizontal: 20, padding: 5, backgroundColor: '#ebe8e3', borderRadius: 16, marginBottom: 12, marginTop: 8 },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 12 }, active: { backgroundColor: '#fff' }, tabText: { fontWeight: '600', color: '#596878', fontSize: 15 },

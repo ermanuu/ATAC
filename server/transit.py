@@ -176,7 +176,7 @@ realtime = Realtime()
 
 
 def status():
-    result = {"provider": "Roma Servizi per la Mobilità", "staticAvailable": False,
+    result = {"apiVersion": 2, "provider": "Roma Servizi per la Mobilità", "staticAvailable": False,
               "staticImportedAt": None, "vehiclesUrl": VEHICLES_URL, "updatesUrl": UPDATES_URL}
     if DB.exists():
         with connect() as db:
@@ -281,7 +281,7 @@ def arrivals(stop_id):
             numbers = {number for route, number in candidates if not route or route == item["routeId"]}
             if len(numbers) == 1:
                 item["vehicleId"] = numbers.pop()
-    return {"arrivals": scheduled,
+    return {"apiVersion": 2, "arrivals": scheduled,
             "liveAvailable": live["available"], "timestamp": live["timestamp"]}
 
 
