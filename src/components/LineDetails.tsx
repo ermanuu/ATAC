@@ -35,7 +35,7 @@ export function RouteDirections() {
 function BusThumbnail({ vehicle, caption, onPress, image }: { vehicle: Vehicle; caption: string; onPress: () => void; image: ImageRef | null }) {
   return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.retained ? ', ultima posizione nota' : vehicle.positionSource === 'predictions' ? ', prossima fermata da previsioni live' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
     <Image source={image || BUS_ICON} placeholder={image || BUS_ICON} contentFit="contain" placeholderContentFit="contain" cachePolicy="memory-disk" transition={0} style={s.busImage} />
-    <Text numberOfLines={1} style={s.busId}>{vehicle.retained ? '≈ ' : ''}{vehicle.vehicleId || '—'}</Text>
+    <Text numberOfLines={1} style={s.busId}>{vehicle.vehicleId || '—'}</Text>
   </Pressable>;
 }
 
@@ -74,7 +74,6 @@ export function RouteTimeline() {
         </ScrollView>
       </GlassSurface>
       <Text style={s.small}>{data.liveAvailable ? `${positionStamp(data.timestamp)} · Aggiornamento ogni 10 sec.` : 'Posizioni live non disponibili · Aggiornamento ogni 10 sec.'}</Text>
-      {vehicles.some(v => v.retained) && <Text style={s.small}>≈ Ultima posizione nota, mostrata per un massimo di 3 minuti.</Text>}
       <Text style={s.heading}>Fermate</Text>
       <GlassSurface style={s.timeline}>
         {visibleStops.map((stop, i) => {
