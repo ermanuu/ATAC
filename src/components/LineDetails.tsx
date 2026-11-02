@@ -54,7 +54,7 @@ export function RouteTimeline() {
   }, []);
   const now = Math.max(tick, state.receivedAt);
   const data = state.data;
-  useEffect(() => { if (data) publish({ routeId: id, variant, line: data.route.name, direction: data.selectedVariant.headsign }); }, [data, id, variant, publish]);
+  useEffect(() => { if (data) publish({ routeId: id, variant, line: data.route.name, direction: data.selectedVariant.headsign, updating: state.loading }); }, [data, id, variant, publish, state.loading]);
   const departures = data?.departures.filter(d => now - 600 <= d.time && d.time <= now + 3600) || [];
   const visibleStops = data?.stops.map(stop => ({ ...stop,
     vehiclesAt: visibleVehicles(stop.vehiclesAt, now, Boolean(state.error)),
@@ -64,7 +64,7 @@ export function RouteTimeline() {
   const selected = vehicles.find(v => v.id === vehicleInfo?.id);
   const vehicleCount = vehicles.length;
   return <View style={s.stack}>
-    <RequestState state={state} />
+    <RequestState state={state} showLoading={!data} />
     {data && <>
       <GlassSurface style={s.departureStrip}>
         <Text numberOfLines={1} style={s.departureLabel} accessibilityLabel="Partenze dal capolinea, da dieci minuti fa a un’ora avanti">Partenze da {data.selectedVariant.fromName.toLocaleUpperCase('it-IT')}:</Text>

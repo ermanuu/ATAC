@@ -216,23 +216,21 @@ def route_detail(route_id, variant=None, now=None, refresh=False):
 
 def arrivals(stop_id, refresh=False):
     from .lines import stop_distance, variant_id
-    from .realtime_utils import stop_event_index, stop_event_time
+    from .realtime_utils import stop_predictions
     now = int(time.time())
     scheduled = []
     variants = {}
     patterns = {}
-    scheduled_departures = {}
     with connect() as db:
         for epoch, active in service_windows(db, now, 7200):
             service_date = datetime.fromtimestamp(epoch+43200, ROME).strftime('%Y%m%d')
             for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
                     if r["trip_id"] not in variants:
-                        patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT ti.stop_id,ti.sequence,s.lat,s.lon FROM times ti JOIN stops s ON s.stop_id=ti.stop_id WHERE ti.trip_id=? ORDER BY ti.sequence", (r["trip_id"],))]
+                        patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT ti.stop_id,ti.sequence,ti.arrival,ti.departure,s.lat,s.lon FROM times ti JOIN stops s ON s.stop_id=ti.stop_id WHERE ti.trip_id=? ORDER BY ti.sequence", (r["trip_id"],))]
                         stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
                     scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": service_date})
-                    scheduled_departures[(r['trip_id'], service_date, r['sequence'])] = int(epoch+r['departure'])
     live = read_live("updates", refresh)
     if live["available"]:
         by_trip = {}
@@ -245,6 +243,7 @@ def arrivals(stop_id, refresh=False):
                 if 0 <= now - stamp <= 180 and (previous is None or stamp >= int(previous.timestamp or live['timestamp'] or 0)):
                     by_trip[key] = update
         keep = []
+        resolved = {}
         for item in scheduled:
             update = by_trip.get((item["tripId"], item["serviceDate"]))
             if update is None:
@@ -255,25 +254,18 @@ def arrivals(stop_id, refresh=False):
                     continue
                 if update.trip.schedule_relationship == gtfs_realtime_pb2.TripDescriptor.CANCELED:
                     continue
-                skipped = False
-                for event in update.stop_time_update:
-                    index = stop_event_index(event, patterns[item['tripId']])
-                    if index is None or patterns[item['tripId']][index]['sequence'] != item['stopSequence']:
-                        continue
-                    if event.schedule_relationship == gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.SKIPPED:
-                        skipped = True
-                        break
-                    if event.schedule_relationship == gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.NO_DATA:
-                        break
-                    for field in ("arrival", "departure"):
-                        base = item['scheduledTime'] if field == 'arrival' else scheduled_departures[(item['tripId'], item['serviceDate'], item['stopSequence'])]
-                        value = stop_event_time(event, field, base)
-                        if value is not None:
-                            item.update(time=value, kind='live')
-                            break
-                    break
-                if skipped:
+                pattern = patterns[item['tripId']]
+                index = next(i for i, s in enumerate(pattern) if s['sequence'] == item['stopSequence'])
+                key = (item['tripId'], item['serviceDate'])
+                if key not in resolved:
+                    epoch = item['scheduledTime'] - pattern[index]['arrival']
+                    resolved[key] = stop_predictions(update, pattern, epoch)
+                prediction = resolved[key].get(index, {})
+                if prediction.get('skipped'):
                     continue
+                value = prediction.get('arrival', prediction.get('departure'))
+                if value is not None:
+                    item.update(time=value, kind='live', predictionSource=prediction['source'])
                 if item["kind"] == "live":
                     item['predictionTimestamp'] = int(update.timestamp or live['timestamp'] or 0)
                     if update.HasField('vehicle'):
@@ -318,17 +310,22 @@ def arrivals(stop_id, refresh=False):
                 item['atTerminusTimestamp'] = min(stamp for _, _, stamp in matching)
             if not item["vehicleId"] and len(numbers) == 1 and (item['kind'] == 'live' or item['atTerminus']):
                 item["vehicleId"] = numbers.pop()
+            if item['atTerminus'] and (item['kind'] == 'scheduled' or item['time'] < now):
+                # A real parked vehicle is a live presence, not a scheduled
+                # arrival. Without a usable ETA show its state, not a clock.
+                item.update(kind='observed', time=None)
     # An observed bus still waiting at its origin must not vanish merely
     # because its timetable elapsed. Preserve that time instead of inventing
     # a new ETA; the client shows "In attesa" until the observation expires.
-    scheduled = [i for i in scheduled if i['time'] >= now or i.get('atTerminus')]
+    scheduled = [i for i in scheduled if i.get('atTerminus') or i['time'] is not None and i['time'] >= now]
     unique = {}
+    rank = {'scheduled': 0, 'observed': 1, 'live': 2}
     for item in scheduled:
         key = (item['routeId'], item['tripId'], item['serviceDate'], item['stopSequence'])
         previous = unique.get(key)
-        if previous is None or (item['kind'] == 'live', item.get('predictionTimestamp', 0)) > (previous['kind'] == 'live', previous.get('predictionTimestamp', 0)):
+        if previous is None or (rank[item['kind']], item.get('predictionTimestamp', 0)) > (rank[previous['kind']], previous.get('predictionTimestamp', 0)):
             unique[key] = item
-    scheduled = sorted(unique.values(), key=lambda item: (item['kind'] != 'live', item['time']))
+    scheduled = sorted(unique.values(), key=lambda item: (-rank[item['kind']], item['time'] or 0))
     return {"apiVersion": 2, "arrivals": scheduled,
             "liveAvailable": live["available"], "timestamp": live["timestamp"]}
 

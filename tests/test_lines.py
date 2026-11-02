@@ -360,6 +360,31 @@ class LineTests(unittest.TestCase):
         v,u=self.rome_forecast(); v.timestamp=self.now; u.timestamp=self.now-30
         self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
 
+    def test_future_arrival_prevents_gps_from_putting_bus_after_that_stop(self):
+        v, u = self.rome_forecast()
+        u.stop_time_update[0].arrival.time = self.now + 30
+        u.stop_time_update[1].arrival.time = self.now + 90
+        v.position.latitude = 41.915; v.position.longitude = 12.505
+        board = self.board('EUR FERMI (MB)')
+        self.assertEqual(board['stops'][1]['vehiclesBefore'][0]['vehicleId'], '2641')
+        self.assertFalse(board['stops'][2]['vehiclesBefore'])
+
+    def test_newer_delayed_arrival_corrects_a_previous_forecast_that_was_too_far_ahead(self):
+        _, u = self.rome_forecast()
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
+        self.now += 10; u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now + 30
+        u.stop_time_update[1].arrival.time = self.now + 90
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][2]['vehiclesBefore'])
+        item = board['stops'][1]['vehiclesBefore'][0]
+        self.assertEqual(item['vehicleId'], '2641')
+        self.assertFalse(item['retained'])
+        # A delayed older response must not move it back ahead again.
+        u.timestamp = self.now - 10
+        u.stop_time_update[0].arrival.time = self.now - 10
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
     def future_only_forecast(self):
         self.add_trip('2610',36000,headsign='RO TELLINI',stops=('a','b','c','d'))
         with sqlite3.connect(t.DB) as db:

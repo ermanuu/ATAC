@@ -1,11 +1,11 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 
-type LineTitle = { routeId: string; variant: string; line: string; direction: string };
+type LineTitle = { routeId: string; variant: string; line: string; direction: string; updating?: boolean };
 const LineHeaderContext = createContext<{ title: LineTitle | null; publish: (title: LineTitle) => void }>({ title: null, publish: () => {} });
 export function LineHeaderProvider({ children }: React.PropsWithChildren) {
   const [title, setTitle] = useState<LineTitle | null>(null);
   const publish = useCallback((next: LineTitle) => {
-    setTitle(current => current?.routeId === next.routeId && current.variant === next.variant && current.line === next.line && current.direction === next.direction ? current : next);
+    setTitle(current => current?.routeId === next.routeId && current.variant === next.variant && current.line === next.line && current.direction === next.direction && current.updating === next.updating ? current : next);
   }, []);
   return <LineHeaderContext.Provider value={{ title, publish }}>{children}</LineHeaderContext.Provider>;
 }

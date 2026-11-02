@@ -83,7 +83,14 @@ class MarkerHistory:
                 old_progress = (old_index, old_item['placement'] == 'at')
                 progress = (index, item['placement'] == 'at') if index is not None else None
                 evidence = lambda value: max(value['timestamp'], value.get('predictionTimestamp') or 0)
-                if progress is None or progress < old_progress or evidence(item) < evidence(old_item):
+                bound, stamp = item.get('upcomingStopIndex'), item.get('upcomingTimestamp')
+                corrected_forecast = (index is not None and bound is not None and old_index > bound and
+                                      stamp is not None and 0 <= now - stamp <= 180 and
+                                      stamp >= (old_item.get('upcomingTimestamp') or old_item.get('predictionTimestamp') or 0))
+                incoming_forecast = item.get('upcomingTimestamp') or item.get('predictionTimestamp')
+                previous_forecast = old_item.get('upcomingTimestamp') or old_item.get('predictionTimestamp')
+                older_forecast = incoming_forecast is not None and previous_forecast is not None and incoming_forecast < previous_forecast
+                if older_forecast or not corrected_forecast and (progress is None or progress < old_progress or evidence(item) < evidence(old_item)):
                     # Never turn a missing forecast / inconsistent new reference
                     # into backward travel. Keep the original timestamps, and
                     # remember progress even after the icon expires so repeated
