@@ -2,7 +2,7 @@
 from datetime import datetime
 from google.transit import gtfs_realtime_pb2 as pb
 from . import transit as t
-from .realtime_utils import stop_event_index
+from .realtime_utils import stop_event_index, stop_event_time
 
 
 def next_arrival(vehicle, trip, stops, start, now, live, windows):
@@ -60,23 +60,22 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
                 return {}
             times = {}
             for field in ('arrival', 'departure'):
-                if event.HasField(field):
-                    prediction = getattr(event, field)
-                    if prediction.HasField('time'):
-                        times[field] = int(prediction.time)
-                    elif prediction.HasField('delay'):
-                        times[field] = int(epoch + stops[index][field] + prediction.delay)
+                value = stop_event_time(event, field, epoch + stops[index][field])
+                if value is not None:
+                    times[field] = value
             return times
 
         begin = start
         if events and min(events) > start:
-            # A future-only update can omit the passed prefix. Require
-            # two consecutive future stops, not an isolated downstream ETA.
+            # The provider omits the passed prefix, but the first remaining
+            # ETA can cross "now" before the next feed arrives. Requiring it
+            # to stay in the future pins the marker behind the stop board.
+            # Keep two consecutive, ordered events as the identity anchor.
             first = min(events)
             first_times, following_times = event_times(first), event_times(first + 1)
             first_time = first_times.get('arrival', first_times.get('departure'))
             following_time = following_times.get('arrival', following_times.get('departure'))
-            if first_time is None or following_time is None or not now <= first_time <= now + 600 or following_time < first_time:
+            if first_time is None or following_time is None or not now - 180 <= first_time <= now + 600 or following_time < first_time:
                 continue
             begin = first
         for index in range(begin, len(stops)):
@@ -98,7 +97,14 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
             # Every crossed stop needs an explicit past event; missing updates
             # must never be interpreted as stops the bus has already passed.
             if passed is None or passed > now:
+                if index > start:
+                    candidates[-1] = index
                 break
+            # A passed event is enough to leave that stop, even when the
+            # next ETA is omitted / NO_DATA. It proves only the next segment:
+            # missing intermediate events must never authorize a bigger jump.
+            if index + 1 < len(stops):
+                candidates[-1] = index + 1
     if not candidates:
         return None
     indices = set(candidates)

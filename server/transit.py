@@ -216,20 +216,23 @@ def route_detail(route_id, variant=None, now=None, refresh=False):
 
 def arrivals(stop_id, refresh=False):
     from .lines import variant_id
-    from .realtime_utils import stop_event_index
+    from .realtime_utils import stop_event_index, stop_event_time
     now = int(time.time())
     scheduled = []
     variants = {}
     patterns = {}
+    scheduled_departures = {}
     with connect() as db:
         for epoch, active in service_windows(db, now, 7200):
+            service_date = datetime.fromtimestamp(epoch+43200, ROME).strftime('%Y%m%d')
             for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
                     if r["trip_id"] not in variants:
                         patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT stop_id,sequence FROM times WHERE trip_id=? ORDER BY sequence", (r["trip_id"],))]
                         stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
-                    scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": datetime.fromtimestamp(epoch+43200, ROME).strftime("%Y%m%d")})
+                    scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": service_date})
+                    scheduled_departures[(r['trip_id'], service_date, r['sequence'])] = int(epoch+r['departure'])
     live = read_live("updates", refresh)
     if live["available"]:
         by_trip = {}
@@ -263,14 +266,11 @@ def arrivals(stop_id, refresh=False):
                     if event.schedule_relationship == gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.NO_DATA:
                         break
                     for field in ("arrival", "departure"):
-                        if event.HasField(field):
-                            prediction = getattr(event, field)
-                            if prediction.HasField("time"):
-                                item.update(time=int(prediction.time), kind="live")
-                                break
-                            if prediction.HasField("delay"):
-                                item.update(time=item["time"] + prediction.delay, kind="live")
-                                break
+                        base = item['scheduledTime'] if field == 'arrival' else scheduled_departures[(item['tripId'], item['serviceDate'], item['stopSequence'])]
+                        value = stop_event_time(event, field, base)
+                        if value is not None:
+                            item.update(time=value, kind='live')
+                            break
                     break
                 if skipped:
                     continue
