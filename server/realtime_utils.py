@@ -1,4 +1,15 @@
 """Resolve a realtime stop reference consistently in boards and arrivals."""
+def stop_event_time(event, field, scheduled_time):
+    """Use the same absolute time / delay precedence in arrivals and markers."""
+    if event.HasField(field):
+        prediction = getattr(event, field)
+        if prediction.HasField('time'):
+            return int(prediction.time)
+        if prediction.HasField('delay'):
+            return int(scheduled_time + prediction.delay)
+    return None
+
+
 def stop_event_index(event, stops):
     matches = [i for i, stop in enumerate(stops) if event.stop_id and stop['stop_id'] == event.stop_id]
     if len(matches) == 1:

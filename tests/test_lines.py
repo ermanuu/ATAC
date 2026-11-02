@@ -381,6 +381,86 @@ class LineTests(unittest.TestCase):
         self.assertEqual(item['positionSource'],'predictions')
         self.assertEqual(item['predictionTimestamp'],self.now-120)
 
+    def test_omitted_prefix_with_just_passed_first_stop_advances_like_arrivals(self):
+        _, u = self.future_only_forecast()
+        u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now - 10
+        u.stop_time_update[1].arrival.time = self.now + 50
+        board = self.board('RO TELLINI')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertFalse(board['stops'][2]['vehiclesBefore'])
+        self.assertEqual(board['stops'][3]['vehiclesBefore'][0]['vehicleId'], '2610')
+        with patch.object(t.time, 'time', return_value=self.now):
+            self.assertFalse([a for a in t.arrivals('c')['arrivals'] if a['tripId'] == '2610'])
+            arrival = next(a for a in t.arrivals('d')['arrivals'] if a['tripId'] == '2610')
+        self.assertEqual(arrival['kind'], 'live')
+        self.assertEqual(arrival['time'], self.now + 50)
+
+    def test_icon_leaves_passed_stop_even_without_next_eta(self):
+        _, u = self.rome_forecast()
+        del u.stop_time_update[1]
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['vehicleId'], '2641')
+
+    def test_passage_advances_only_one_step_before_a_missing_stop_update(self):
+        v, u = self.future_only_forecast()
+        v.stop_id = 'a'; v.current_stop_sequence = 10
+        u.stop_time_update.clear()
+        for sequence, delta in [(10, -10), (40, 60)]:
+            event = u.stop_time_update.add(); event.stop_sequence = sequence
+            event.arrival.time = self.now + delta
+        board = self.board('RO TELLINI')
+        self.assertEqual(board['stops'][1]['vehiclesBefore'][0]['vehicleId'], '2610')
+        self.assertFalse(board['stops'][3]['vehiclesBefore'])
+
+    def test_first_omitted_prefix_stop_with_future_departure_does_not_get_skipped(self):
+        _, u = self.future_only_forecast()
+        u.stop_time_update[0].arrival.time = self.now - 10
+        u.stop_time_update[0].departure.time = self.now + 20
+        board = self.board('RO TELLINI')
+        self.assertTrue(board['stops'][2]['vehiclesBefore'])
+        self.assertFalse(board['stops'][3]['vehiclesBefore'])
+
+    def test_old_or_unordered_prefix_anchor_cannot_skip_to_future_stop(self):
+        _, u = self.future_only_forecast()
+        u.stop_time_update[0].arrival.time = self.now - 181
+        self.assertTrue(self.board('RO TELLINI')['stops'][1]['vehiclesBefore'])
+        u.stop_time_update[0].arrival.time = self.now + 120
+        u.stop_time_update[1].arrival.time = self.now + 60
+        self.assertTrue(self.board('RO TELLINI')['stops'][1]['vehiclesBefore'])
+
+    def test_updated_eta_can_hold_bus_before_passage(self):
+        _, u = self.rome_forecast()
+        u.stop_time_update[0].arrival.time = self.now + 10
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+        self.now += 15
+        u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now + 20
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+        self.now += 21
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
+
+    def test_cached_live_events_advance_again_when_the_next_arrival_passes(self):
+        v, u = self.future_only_forecast()
+        v.stop_id = 'a'; v.current_stop_sequence = 10
+        u.timestamp = self.now
+        u.stop_time_update.clear()
+        for sequence, delta in [(20, -10), (30, 10), (40, 50)]:
+            event = u.stop_time_update.add(); event.stop_sequence = sequence
+            event.arrival.time = self.now + delta
+        self.assertTrue(self.board('RO TELLINI')['stops'][2]['vehiclesBefore'])
+        with patch.object(t.time, 'time', return_value=self.now):
+            self.assertTrue([a for a in t.arrivals('c')['arrivals'] if a['tripId'] == '2610'])
+        # The source packet and GPS are unchanged: the stop's live ETA alone
+        # crosses now, exactly as it does in the per-stop arrival list.
+        self.now += 11
+        board = self.board('RO TELLINI')
+        self.assertFalse(board['stops'][2]['vehiclesBefore'])
+        self.assertTrue(board['stops'][3]['vehiclesBefore'])
+        with patch.object(t.time, 'time', return_value=self.now):
+            self.assertFalse([a for a in t.arrivals('c')['arrivals'] if a['tripId'] == '2610'])
+
     def test_expired_future_only_forecast_cannot_move_bus(self):
         _,u=self.future_only_forecast(); u.timestamp=self.now-181
         self.assertTrue(self.board('RO TELLINI')['stops'][1]['vehiclesBefore'])

@@ -96,6 +96,17 @@ class StopArrivalsTests(unittest.TestCase):
         event=e.trip_update.stop_time_update.add(); event.stop_id='b'; event.schedule_relationship=pb.TripUpdate.StopTimeUpdate.SKIPPED
         self.assertEqual(t.arrivals('b')['arrivals'],[])
 
+    def test_departure_only_delay_uses_the_departure_schedule(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE times SET departure=36900 WHERE trip_id='t1' AND stop_id='b'")
+        f = self.feed(); e = f.entity.add(); e.id = 'departure-only'
+        e.trip_update.trip.trip_id = 't1'
+        event = e.trip_update.stop_time_update.add(); event.stop_id = 'b'
+        event.departure.delay = 120
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertEqual(item['kind'], 'live')
+        self.assertEqual(item['time'], self.now + 1020)
+
     def test_loop_updates_only_matching_stop_sequence(self):
         with sqlite3.connect(t.DB) as db:
             db.execute('INSERT INTO trips VALUES (?,?,?,?,?)',('loop','r1','daily','Loop','0'))
