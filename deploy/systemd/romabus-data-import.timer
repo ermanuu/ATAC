@@ -1,0 +1,10 @@
+[Unit]
+Description=Aggiornamento giornaliero orari Roma Autobus alle 04:00 (Roma)
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 Europe/Rome
+Persistent=true
+Unit=romabus-data-import.service
+
+[Install]
+WantedBy=timers.target

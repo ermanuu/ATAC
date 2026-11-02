@@ -1,0 +1,34 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Esegui con sudo: sudo aggiorna-romabus" >&2
+    exit 1
+fi
+
+cd /opt/romabus
+
+# Share the importer's Linux lock so dependencies cannot change mid-import.
+mkdir -p server/data
+exec 9>server/data/.import.lock
+flock 9
+
+echo "Scaricamento aggiornamenti..."
+git pull --ff-only origin main
+
+echo "Installazione dipendenze..."
+npm ci
+.venv/bin/python -m pip install -r server/requirements.txt
+
+echo "Preparazione sito..."
+npm run build:web
+
+echo "Configurazione aggiornamento giornaliero..."
+chown -R romabus:romabus /opt/romabus
+bash scripts/install-data-refresh.sh
+
+echo "Riavvio servizio..."
+systemctl restart romabus
+systemctl is-active --quiet romabus
+
+echo "Aggiornamento completato: https://romabus.duckdns.org"
