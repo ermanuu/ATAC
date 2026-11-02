@@ -215,7 +215,7 @@ def route_detail(route_id, variant=None, now=None, refresh=False):
 
 
 def arrivals(stop_id, refresh=False):
-    from .lines import variant_id
+    from .lines import stop_distance, variant_id
     from .realtime_utils import stop_event_index, stop_event_time
     now = int(time.time())
     scheduled = []
@@ -228,7 +228,7 @@ def arrivals(stop_id, refresh=False):
             for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
                     if r["trip_id"] not in variants:
-                        patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT stop_id,sequence FROM times WHERE trip_id=? ORDER BY sequence", (r["trip_id"],))]
+                        patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT ti.stop_id,ti.sequence,s.lat,s.lon FROM times ti JOIN stops s ON s.stop_id=ti.stop_id WHERE ti.trip_id=? ORDER BY ti.sequence", (r["trip_id"],))]
                         stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
                     scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": service_date})
@@ -280,8 +280,10 @@ def arrivals(stop_id, refresh=False):
                         item['vehicleId'] = update.vehicle.label.strip() or None
             keep.append(item)
         scheduled = keep
-    scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
-    if any(i["kind"] == "live" for i in scheduled):
+    scheduled = sorted((i for i in scheduled if i["time"] <= now+7200), key=lambda i: i["time"])
+    # A vehicle can be observed at its terminus even when this particular
+    # downstream stop has no realtime ETA (e.g. 74354 after origin 74353).
+    if scheduled:
         positions = read_live("vehicles", refresh)
         assignments = {}
         assignment_now = int(time.time())
@@ -292,23 +294,34 @@ def arrivals(stop_id, refresh=False):
                 vehicle = entity.vehicle
                 stamp = int(vehicle.timestamp or positions["timestamp"])
                 number = vehicle.vehicle.label.strip()
-                if number and entity.id not in positions.get("retained", ()) and 0 <= assignment_now - stamp <= 90:
+                if number and entity.id not in positions.get("retained", ()) and 0 <= assignment_now - stamp <= 180:
                     key = (vehicle.trip.trip_id, vehicle.trip.start_date)
                     pattern = patterns.get(vehicle.trip.trip_id, [])
                     first = pattern[0] if pattern else None
                     at_terminal = bool(first and vehicle.current_status == gtfs_realtime_pb2.VehiclePosition.STOPPED_AT and (
                         vehicle.stop_id == first['stop_id'] if vehicle.stop_id else
                         vehicle.HasField('current_stop_sequence') and vehicle.current_stop_sequence == first['sequence']))
-                    assignments.setdefault(key, []).append((vehicle.trip.route_id, number, at_terminal))
+                    if at_terminal and vehicle.HasField('position'):
+                        lat, lon = vehicle.position.latitude, vehicle.position.longitude
+                        at_terminal = -90 <= lat <= 90 and -180 <= lon <= 180 and stop_distance(lat, lon, first) <= 150
+                    # Parked vehicles can report less often. Keep their actual
+                    # measurement clock, bounded by the realtime 180 s limit.
+                    if assignment_now - stamp <= 90 or at_terminal:
+                        assignments.setdefault(key, []).append((vehicle.trip.route_id, number, at_terminal, stamp))
         for item in scheduled:
-            if item["kind"] != "live":
-                continue
             candidates = assignments.get((item["tripId"], item["serviceDate"]), assignments.get((item["tripId"], ""), []))
-            numbers = {number for route, number, _ in candidates if not route or route == item["routeId"]}
-            matching = [terminal for route, number, terminal in candidates if (not route or route == item['routeId']) and (not item['vehicleId'] or number == item['vehicleId'])]
-            item['atTerminus'] = bool(matching and all(matching))
-            if not item["vehicleId"] and len(numbers) == 1:
+            matching = [(number, terminal, stamp) for route, number, terminal, stamp in candidates
+                        if (not route or route == item['routeId']) and (not item['vehicleId'] or number == item['vehicleId'])]
+            numbers = {number for number, _, _ in matching}
+            item['atTerminus'] = len(numbers) == 1 and all(terminal for _, terminal, _ in matching)
+            if item['atTerminus']:
+                item['atTerminusTimestamp'] = min(stamp for _, _, stamp in matching)
+            if not item["vehicleId"] and len(numbers) == 1 and (item['kind'] == 'live' or item['atTerminus']):
                 item["vehicleId"] = numbers.pop()
+    # An observed bus still waiting at its origin must not vanish merely
+    # because its timetable elapsed. Preserve that time instead of inventing
+    # a new ETA; the client shows "In attesa" until the observation expires.
+    scheduled = [i for i in scheduled if i['time'] >= now or i.get('atTerminus')]
     unique = {}
     for item in scheduled:
         key = (item['routeId'], item['tripId'], item['serviceDate'], item['stopSequence'])
