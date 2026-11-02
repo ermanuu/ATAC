@@ -43,6 +43,8 @@ npm run api
 
 Il comando di importazione richiede accesso HTTPS a `romamobilita.it` e agli eventuali host di redirect ufficiali. Costruisce un database SQLite indicizzato in `server/data/` e lo sostituisce solo dopo un’importazione riuscita. Ripetere ogni giorno per aggiornare il calendario. Non avviare importazioni concorrenti.
 
+Sulla VM Linux con systemd puoi automatizzare `npm run data:import` ogni giorno alle **04:00, ora di Roma**. La [guida per la VM](deploy/README.md) spiega l’attivazione e aggiorna anche lo script `aggiorna-romabus`. Su Linux un blocco condiviso serializza importazioni manuali, importazioni giornaliere e aggiornamenti del codice.
+
 L’API di sviluppo ascolta su loopback porta 8000. Verifica interna: `curl -f http://127.0.0.1:8000/api/status`. Stato HTTP 200 indica che l’API risponde: verificare anche `staticAvailable`, `serviceToday`, `vehicles.available` e `updates.available`. Senza orari importati, gli endpoint di ricerca restituiscono 503.
 
 In un secondo terminale:

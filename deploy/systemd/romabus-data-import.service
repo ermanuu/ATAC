@@ -1,0 +1,15 @@
+[Unit]
+Description=Aggiornamento orari GTFS Roma Autobus
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=romabus
+Group=romabus
+WorkingDirectory=/opt/romabus
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/env npm run data:import
+TimeoutStartSec=30min
+Nice=10
