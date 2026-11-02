@@ -147,8 +147,9 @@ class Realtime:
     def __init__(self):
         self.lock = threading.Lock()
         self.cache = {}
-        from .positions import PositionHistory
+        from .positions import MarkerHistory, PositionHistory
         self.positions = PositionHistory()
+        self.markers = MarkerHistory()
 
     def read(self, kind, force=False):
         with self.lock:

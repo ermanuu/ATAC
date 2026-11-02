@@ -143,7 +143,7 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
             continue
         vehicle = entity.vehicle
         timestamp = int(vehicle.timestamp or live['timestamp'])
-        if entity.id in live.get('retained', ()) or not live['available'] or not 0 <= now - timestamp <= 90:
+        if not 0 <= now - timestamp <= 180:
             continue
         if vehicle.trip.HasField('direction_id') and group['direction'] and str(vehicle.trip.direction_id) != group['direction']:
             continue
@@ -218,9 +218,6 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
             index, prediction_timestamp = forecast
             placement_override, source = 'before', 'predictions'
             estimated = True
-        if index is None:
-            unplaced += 1
-            continue
         stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
         placement = placement_override or ('at' if stopped or estimated else 'before')
         item = {'tripId': trip_id, 'serviceDate': vehicle.trip.start_date, 'id': vehicle.vehicle.id or entity.id, 'vehicleId': vehicle.vehicle.label.strip() or None, 'timestamp': timestamp,
@@ -231,6 +228,14 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
                 'timestampSource': 'vehicle' if vehicle.timestamp and entity.id not in live.get('feedTimestamps', ()) else 'feed',
                 'lat': vehicle.position.latitude if vehicle.HasField('position') else None,
                 'lon': vehicle.position.longitude if vehicle.HasField('position') else None}
+        located = t.realtime.markers.resolve(
+            (next(iter(group['trips'].values()))['route_id'], group['id']),
+            (trip_id, vehicle.trip.start_date, vehicle.trip.start_time), index, item, now)
+        if located is None:
+            unplaced += 1
+            continue
+        index, item = located
+        placement = item['placement']
         stops[index]['vehiclesAt' if placement == 'at' else 'vehiclesBefore'].append(item)
     return stops, unplaced
 
