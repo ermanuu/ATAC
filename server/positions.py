@@ -1,4 +1,5 @@
 """Bounded last-known positions across incomplete realtime snapshots."""
+import threading
 from google.transit import gtfs_realtime_pb2 as pb
 
 
@@ -58,3 +59,44 @@ class PositionHistory:
             if key not in seen:
                 retained.append(entity.id)
         return result, retained, feed_timestamps
+
+
+class MarkerHistory:
+    """Keep a trip's displayed progress without refreshing old location evidence."""
+    def __init__(self):
+        self.entries = {}
+        self.lock = threading.Lock()
+        self.last_cleanup = 0
+
+    def resolve(self, board, journey, index, item, now):
+        # Without a trip ID there is no reliable boundary between two runs.
+        if not journey[0]:
+            return (index, item) if index is not None else None
+        key = (*board, item['id'])
+        with self.lock:
+            if now - self.last_cleanup >= 60:
+                self.entries = {k: v for k, v in self.entries.items() if now - v[3] <= 21600}
+                self.last_cleanup = now
+            previous = self.entries.get(key)
+            if previous and previous[0] == journey:
+                _, old_index, old_item, _ = previous
+                old_progress = (old_index, old_item['placement'] == 'at')
+                progress = (index, item['placement'] == 'at') if index is not None else None
+                evidence = lambda value: max(value['timestamp'], value.get('predictionTimestamp') or 0)
+                if progress is None or progress < old_progress or evidence(item) < evidence(old_item):
+                    # Never turn a missing forecast / inconsistent new reference
+                    # into backward travel. Keep the original timestamps, and
+                    # remember progress even after the icon expires so repeated
+                    # bad packets cannot revive it at an already passed stop.
+                    self.entries[key] = (journey, old_index, old_item, now)
+                    prediction = old_item.get('predictionTimestamp')
+                    if 0 <= now - old_item['timestamp'] <= 180 and (
+                        old_item['positionSource'] != 'predictions' or
+                        prediction is not None and 0 <= now - prediction <= 180
+                    ):
+                        return old_index, old_item | {'retained': True}
+                    return None
+            if index is None:
+                return None
+            self.entries[key] = (journey, index, item.copy(), now)
+            return index, item

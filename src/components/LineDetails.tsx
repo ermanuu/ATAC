@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
+import { visibleVehicles } from '../lib/vehicles';
 
 const BUS_ICON = require('../../assets/bus-front.png');
 
@@ -32,14 +33,13 @@ export function RouteDirections() {
 }
 
 function BusThumbnail({ vehicle, caption, onPress, image }: { vehicle: Vehicle; caption: string; onPress: () => void; image: ImageRef | null }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.positionSource === 'predictions' ? ', prossima fermata da previsioni live' : vehicle.retained ? ', ultima posizione nota' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.retained ? ', ultima posizione nota' : vehicle.positionSource === 'predictions' ? ', prossima fermata da previsioni live' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
     <Image source={image || BUS_ICON} placeholder={image || BUS_ICON} contentFit="contain" placeholderContentFit="contain" cachePolicy="memory-disk" transition={0} style={s.busImage} />
-    <Text numberOfLines={1} style={s.busId}>{vehicle.vehicleId || '—'}</Text>
+    <Text numberOfLines={1} style={s.busId}>{vehicle.retained ? '≈ ' : ''}{vehicle.vehicleId || '—'}</Text>
   </Pressable>;
 }
 
 const positionStamp = (timestamp: number | null) => timestamp ? `Posizioni alle ${new Date(timestamp * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Nessun aggiornamento';
-const fresh = (vehicle: Vehicle, now: number) => now >= vehicle.timestamp && now - vehicle.timestamp <= 90 && !vehicle.retained && (vehicle.positionSource !== 'predictions' || Boolean(vehicle.predictionTimestamp && now - vehicle.predictionTimestamp <= 180));
 export function RouteTimeline() {
   // Share one decoded bitmap across rows: changing stop must not reload the icon.
   const busImage = useImage(BUS_ICON, { maxWidth: 96, maxHeight: 96, tintColor: '#a01d35' });
@@ -56,23 +56,29 @@ export function RouteTimeline() {
   const data = state.data;
   useEffect(() => { if (data) publish({ routeId: id, variant, line: data.route.name, direction: data.selectedVariant.headsign }); }, [data, id, variant, publish]);
   const departures = data?.departures.filter(d => now - 600 <= d.time && d.time <= now + 3600) || [];
-  const selected = data?.stops.flatMap(stop => [...stop.vehiclesAt, ...stop.vehiclesBefore]).find(v => v.id === vehicleInfo?.id && fresh(v, now) && !state.error);
-  const vehicleCount = data?.stops.reduce((total, stop) => total + [...stop.vehiclesAt, ...stop.vehiclesBefore].filter(v => fresh(v, now) && !state.error).length, 0) || 0;
+  const visibleStops = data?.stops.map(stop => ({ ...stop,
+    vehiclesAt: visibleVehicles(stop.vehiclesAt, now, Boolean(state.error)),
+    vehiclesBefore: visibleVehicles(stop.vehiclesBefore, now, Boolean(state.error)),
+  })) || [];
+  const vehicles = visibleStops.flatMap(stop => [...stop.vehiclesAt, ...stop.vehiclesBefore]);
+  const selected = vehicles.find(v => v.id === vehicleInfo?.id);
+  const vehicleCount = vehicles.length;
   return <View style={s.stack}>
     <RequestState state={state} />
     {data && <>
       <GlassSurface style={s.departureStrip}>
         <Text numberOfLines={1} style={s.departureLabel} accessibilityLabel="Partenze dal capolinea, da dieci minuti fa a un’ora avanti">Partenze da {data.selectedVariant.fromName.toLocaleUpperCase('it-IT')}:</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.departureScroller} contentContainerStyle={s.departureTrack}>
-          {departures.map((departure, i) => <Text key={`${departure.tripId}-${departure.serviceDate}-${i}`} numberOfLines={1} accessibilityLabel={`Partenza ${clock(departure.time)}, ${departure.kind === 'live' ? 'live' : 'orario programmato'}`} style={[s.departureTime, departure.kind === 'live' && s.liveTime, departure.time < now && s.pastTime, data.stops[0]?.vehiclesAt.some(v => fresh(v, now) && !state.error && v.status === 'STOPPED_AT' && v.tripId === departure.tripId && (!v.serviceDate || v.serviceDate === departure.serviceDate)) && s.terminalDeparture]}>{clock(departure.time)} <Text style={s.departureKind}>{departure.kind === 'live' ? 'live' : 'prog.'}</Text></Text>)}
+          {departures.map((departure, i) => <Text key={`${departure.tripId}-${departure.serviceDate}-${i}`} numberOfLines={1} accessibilityLabel={`Partenza ${clock(departure.time)}, ${departure.kind === 'live' ? 'live' : 'orario programmato'}`} style={[s.departureTime, departure.kind === 'live' && s.liveTime, departure.time < now && s.pastTime, visibleStops[0]?.vehiclesAt.some(v => !v.retained && v.status === 'STOPPED_AT' && v.tripId === departure.tripId && (!v.serviceDate || v.serviceDate === departure.serviceDate)) && s.terminalDeparture]}>{clock(departure.time)} <Text style={s.departureKind}>{departure.kind === 'live' ? 'live' : 'prog.'}</Text></Text>)}
           {!departures.length && <Text style={s.small}>Nessuna nella fascia −10/+60 min</Text>}
         </ScrollView>
       </GlassSurface>
       <Text style={s.small}>{data.liveAvailable ? `${positionStamp(data.timestamp)} · Aggiornamento ogni 10 sec.` : 'Posizioni live non disponibili · Aggiornamento ogni 10 sec.'}</Text>
+      {vehicles.some(v => v.retained) && <Text style={s.small}>≈ Ultima posizione nota, mostrata per un massimo di 3 minuti.</Text>}
       <Text style={s.heading}>Fermate</Text>
       <GlassSurface style={s.timeline}>
-        {data.stops.map((stop, i) => {
-          const before = stop.vehiclesBefore.filter(v => fresh(v, now) && !state.error), at = stop.vehiclesAt.filter(v => fresh(v, now) && !state.error);
+        {visibleStops.map((stop, i) => {
+          const before = stop.vehiclesBefore, at = stop.vehiclesAt;
           return <View key={`${stop.stop_id}-${stop.sequence}`}>
             <View style={s.timelineRow}>
               <View style={s.vehicleLane}>
@@ -91,7 +97,7 @@ export function RouteTimeline() {
 
       {selected && vehicleInfo && [...stop.vehiclesAt, ...stop.vehiclesBefore].some(v => v.id === selected.id) && <GlassSurface accessibilityRole="alert" style={s.vehicleInfo}>
         <View style={s.row}><Text style={[s.heading, s.flex]}>Vettura {selected.vehicleId || 'non disponibile'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Chiudi dettagli autobus" onPress={() => setVehicleInfo(null)}><Text style={s.close}>×</Text></Pressable></View>
-        <Text style={s.muted}>{selected.status === 'STOPPED_AT' && (i === 0 || i === data.stops.length - 1) && stop.vehiclesAt.some(v => v.id === selected.id) ? 'Al capolinea' : selected.positionSource === 'predictions' ? 'Prossima fermata da previsioni live:' : selected.retained || Boolean(state.error) || now - selected.timestamp > 90 ? 'Ultima posizione nota vicino a' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text>
+        <Text style={s.muted}>{selected.retained ? 'Ultima posizione nota vicino a' : selected.status === 'STOPPED_AT' && (i === 0 || i === data.stops.length - 1) && stop.vehiclesAt.some(v => v.id === selected.id) ? 'Al capolinea' : selected.positionSource === 'predictions' ? 'Prossima fermata da previsioni live:' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text>
         <Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
         {i === 0 && selected.status === 'STOPPED_AT' && departures.filter(d => d.tripId === selected.tripId && (!selected.serviceDate || d.serviceDate === selected.serviceDate)).length === 1 && <Text style={s.expectedTime}>Partenza prevista: {clock(departures.find(d => d.tripId === selected.tripId && (!selected.serviceDate || d.serviceDate === selected.serviceDate))!.time)}</Text>}
       </GlassSurface>}
