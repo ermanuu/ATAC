@@ -259,7 +259,7 @@ def arrivals(stop_id, refresh=False):
                 key = (item['tripId'], item['serviceDate'])
                 if key not in resolved:
                     epoch = item['scheduledTime'] - pattern[index]['arrival']
-                    resolved[key] = stop_predictions(update, pattern, epoch)
+                    resolved[key] = stop_predictions(update, pattern, epoch, propagate=False)
                 prediction = resolved[key].get(index, {})
                 if prediction.get('skipped'):
                     continue
@@ -272,10 +272,8 @@ def arrivals(stop_id, refresh=False):
                         item['vehicleId'] = update.vehicle.label.strip() or None
             keep.append(item)
         scheduled = keep
-    scheduled = sorted((i for i in scheduled if i["time"] <= now+7200), key=lambda i: i["time"])
-    # A vehicle can be observed at its terminus even when this particular
-    # downstream stop has no realtime ETA (e.g. 74354 after origin 74353).
-    if scheduled:
+    scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
+    if any(item['kind'] == 'live' for item in scheduled):
         positions = read_live("vehicles", refresh)
         assignments = {}
         assignment_now = int(time.time())
@@ -301,6 +299,8 @@ def arrivals(stop_id, refresh=False):
                     if assignment_now - stamp <= 90 or at_terminal:
                         assignments.setdefault(key, []).append((vehicle.trip.route_id, number, at_terminal, stamp))
         for item in scheduled:
+            if item['kind'] != 'live':
+                continue
             candidates = assignments.get((item["tripId"], item["serviceDate"]), assignments.get((item["tripId"], ""), []))
             matching = [(number, terminal, stamp) for route, number, terminal, stamp in candidates
                         if (not route or route == item['routeId']) and (not item['vehicleId'] or number == item['vehicleId'])]
@@ -308,18 +308,10 @@ def arrivals(stop_id, refresh=False):
             item['atTerminus'] = len(numbers) == 1 and all(terminal for _, terminal, _ in matching)
             if item['atTerminus']:
                 item['atTerminusTimestamp'] = min(stamp for _, _, stamp in matching)
-            if not item["vehicleId"] and len(numbers) == 1 and (item['kind'] == 'live' or item['atTerminus']):
+            if not item["vehicleId"] and len(numbers) == 1:
                 item["vehicleId"] = numbers.pop()
-            if item['atTerminus'] and (item['kind'] == 'scheduled' or item['time'] < now):
-                # A real parked vehicle is a live presence, not a scheduled
-                # arrival. Without a usable ETA show its state, not a clock.
-                item.update(kind='observed', time=None)
-    # An observed bus still waiting at its origin must not vanish merely
-    # because its timetable elapsed. Preserve that time instead of inventing
-    # a new ETA; the client shows "In attesa" until the observation expires.
-    scheduled = [i for i in scheduled if i.get('atTerminus') or i['time'] is not None and i['time'] >= now]
     unique = {}
-    rank = {'scheduled': 0, 'observed': 1, 'live': 2}
+    rank = {'scheduled': 0, 'live': 1}
     for item in scheduled:
         key = (item['routeId'], item['tripId'], item['serviceDate'], item['stopSequence'])
         previous = unique.get(key)
