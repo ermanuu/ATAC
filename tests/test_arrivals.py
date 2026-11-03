@@ -46,7 +46,94 @@ class StopArrivalsTests(unittest.TestCase):
         vehicle.stop_id = 'a'; vehicle.current_status = pb.VehiclePosition.IN_TRANSIT_TO
         self.assertFalse(item()['atTerminus'])
         vehicle.current_status = pb.VehiclePosition.STOPPED_AT; vehicle.timestamp = self.now - 91
+        self.assertTrue(item()['atTerminus'])
+        self.assertEqual(item()['atTerminusTimestamp'], self.now - 91)
+        vehicle.timestamp = self.now - 181
         self.assertFalse(item()['atTerminus'])
+
+    def test_omitted_stop_uses_live_origin_delay_and_vehicle_at_terminus(self):
+        feed = self.feed()
+        # Like 74354, the next stop has no direct realtime ETA. Only the
+        # preceding terminus has a departure prediction and a stopped bus.
+        e = feed.entity.add(); e.id = 'origin-departure'
+        u = e.trip_update; u.trip.trip_id = 't1'
+        event = u.stop_time_update.add(); event.stop_id = 'a'
+        event.departure.time = self.now + 300
+        e = feed.entity.add(); e.id = 'bus'
+        v = e.vehicle; v.trip.trip_id = 't1'; v.trip.route_id = 'r1'
+        v.trip.start_date = '20261030'; v.vehicle.label = '2687'
+        v.stop_id = 'a'; v.current_status = pb.VehiclePosition.STOPPED_AT
+        v.timestamp = self.now - 120
+        def item():
+            return next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        result = item()
+        self.assertEqual(result['kind'], 'live')
+        self.assertEqual(result['predictionSource'], 'propagated')
+        self.assertEqual(result['time'], self.now + 900)
+        self.assertTrue(result['atTerminus'])
+        self.assertEqual(result['vehicleId'], '2687')
+        self.assertEqual(result['atTerminusTimestamp'], v.timestamp)
+        v.current_status = pb.VehiclePosition.IN_TRANSIT_TO
+        self.assertFalse(item()['atTerminus'])
+        self.assertIsNone(item()['vehicleId'])
+        v.current_status = pb.VehiclePosition.STOPPED_AT
+        v.trip.start_date = '20261031'
+        self.assertFalse(item()['atTerminus'])
+        self.assertIsNone(item()['vehicleId'])
+
+    def test_stale_or_other_service_day_delay_does_not_create_a_live_estimate(self):
+        feed = self.feed(); e = feed.entity.add(); e.id = 'origin'
+        u = e.trip_update; u.trip.trip_id = 't1'; u.timestamp = self.now - 181
+        event = u.stop_time_update.add(); event.stop_id = 'a'; event.departure.delay = 300
+        def item():
+            return next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertEqual(item()['kind'], 'scheduled')
+        u.timestamp = self.now; u.trip.start_date = '20261031'
+        self.assertEqual(item()['kind'], 'scheduled')
+
+    def test_stale_origin_reference_cannot_mark_a_moving_bus_as_at_terminus(self):
+        feed = self.feed(); e = feed.entity.add(); e.id = 'bus'
+        v = e.vehicle; v.trip.trip_id = 't1'; v.trip.route_id = 'r1'
+        v.vehicle.label = '2687'; v.stop_id = 'a'
+        v.current_status = pb.VehiclePosition.STOPPED_AT; v.timestamp = self.now
+        v.position.latitude = 41.91; v.position.longitude = 12.50
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertFalse(item['atTerminus'])
+        v.position.latitude = float('inf')
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertFalse(item['atTerminus'])
+
+    def test_bus_still_waiting_at_origin_is_not_hidden_by_its_past_schedule(self):
+        feed = self.feed(); e = feed.entity.add(); e.id = 'late-bus'
+        v = e.vehicle; v.trip.trip_id = 't1'; v.trip.route_id = 'r1'
+        v.vehicle.label = '2687'; v.stop_id = 'a'
+        v.current_status = pb.VehiclePosition.STOPPED_AT
+        late = self.now + 660
+        v.timestamp = late
+        feed.header.timestamp = late; self.live['timestamp'] = late
+        with patch.object(t.time, 'time', return_value=late):
+            result = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+            self.assertIsNone(result['time'])
+            self.assertEqual(result['kind'], 'observed')
+            self.assertTrue(result['atTerminus'])
+            v.current_status = pb.VehiclePosition.IN_TRANSIT_TO
+            self.assertFalse([a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1'])
+
+    def test_omitted_or_ambiguous_terminal_vehicle_is_not_assigned_to_schedule(self):
+        feed = self.feed()
+        for number in ('2687', '2789'):
+            e = feed.entity.add(); e.id = number
+            v = e.vehicle; v.trip.trip_id = 't1'; v.vehicle.label = number
+            v.stop_id = 'a'; v.current_status = pb.VehiclePosition.STOPPED_AT
+            v.timestamp = self.now
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertFalse(item['atTerminus'])
+        self.assertIsNone(item['vehicleId'])
+        feed.entity.pop()
+        self.live['retained'] = ['2687']
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertFalse(item['atTerminus'])
+        self.assertIsNone(item['vehicleId'])
 
     def test_stop_returns_all_lines_not_just_selected_line(self):
         arrivals=t.arrivals('b')['arrivals']

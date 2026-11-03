@@ -72,8 +72,8 @@ export function useData<T>(path: string | null, interval = 0, retainWhileLoading
   return { data, error, loading, retry, receivedAt };
 }
 
-export function RequestState({ state }: { state: { loading: boolean; error: string; retry: () => void } }) {
-  return <>{state.loading && <ActivityIndicator color="#a01d35" />}{!!state.error && <><Notice text={state.error} /><Button text="Riprova" onPress={state.retry} disabled={state.loading} /></>}</>;
+export function RequestState({ state, showLoading = true }: { state: { loading: boolean; error: string; retry: () => void }; showLoading?: boolean }) {
+  return <>{showLoading && state.loading && <ActivityIndicator color="#a01d35" />}{!!state.error && <><Notice text={state.error} /><Button text="Riprova" onPress={state.retry} disabled={state.loading} /></>}</>;
 }
 function StopSearch({ label, selected, onSelect }: { label: string; selected: Stop | null; onSelect: (stop: Stop | null) => void }) {
   const [query, setQuery] = useState('');
@@ -99,6 +99,7 @@ function AppShell() {
   const stopDetail = pathname.startsWith('/stop/') || (pathname === '/stops' && Boolean(params.stopId));
   const board = lineDetail && Boolean(params.id && params.variant);
   const lineTitle = title && title.routeId === params.id && title.variant === params.variant ? `${title.line}-${title.direction.toLocaleUpperCase('it-IT')}` : '';
+  const lineRefreshing = refreshing || Boolean(lineTitle && title?.updating);
   const tab = stopDetail || pathname === '/stops' ? 'stops' : pathname === '/plan' ? 'plan' : 'lines';
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [pathname, params.stopId]);
   const returnToSearch = () => router.replace({ pathname: '/lines', params: { focus: '1' } });
@@ -120,9 +121,14 @@ function AppShell() {
       </GlassPressable>
 
     </View>}
-    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#96002d" colors={['#96002d']} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : s.scroll}>
+    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#96002d" colors={['#96002d']} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll]}>
       <Slot />
     </ScrollView></View>
+    {board && <View pointerEvents="box-none" style={[s.lineRefreshDock, { bottom: 96 + Math.max(insets.bottom, 12) }]}>
+      <GlassPressable floating accessibilityRole="button" accessibilityLabel="Aggiorna fermate della linea" accessibilityState={{ busy: lineRefreshing, disabled: lineRefreshing }} disabled={lineRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
+        {lineRefreshing ? <ActivityIndicator accessibilityLabel="Aggiornamento fermate in corso" color="#96002d" /> : <Text style={s.lineRefreshIcon}>↻</Text>}
+      </GlassPressable>
+    </View>}
     {!home && <View pointerEvents="box-none" style={[s.bottomDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <GlassSurface floating style={s.bottomBar} accessibilityRole="tablist">
         {([['lines', 'Linee'], ['stops', 'Fermate'], ['plan', 'Percorso']] as const).map(([key, label]) => <Pressable key={key} accessibilityRole="tab" accessibilityLabel={label} aria-selected={key === tab} accessibilityState={{ selected: key === tab }} onPress={() => router.replace(key === 'lines' ? '/lines' : key === 'stops' ? '/stops' : '/plan')} style={({ pressed }) => [s.bottomTab, key === tab && s.bottomTabActive, pressed && s.bottomTabPressed]}>
@@ -260,11 +266,11 @@ export function Stops() {
     {!!navigationError && <Notice text={navigationError} />}
     {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
     {state.data && <>
-      <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
+      <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : arrivals.some(a => a.kind === 'observed') ? 'Posizioni live disponibili · tempi di arrivo non disponibili' : 'Previsioni live non disponibili · solo orari programmati'}</Text>
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={s.route} onPress={() => { void openArrival(a); }}>
-        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Live${a.atTerminus ? ' · al capolinea' : ''} · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
-        <View style={s.arrivalTime}><Text style={[s.time, a.kind === 'live' && s.liveEta]}>{Math.ceil((a.time - now) / 60) <= 1 ? '≤1 min' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.expectedClock]}>{clock(a.time)} ›</Text></View>
+        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind !== 'scheduled' && { color: '#167450' }]}>{a.kind === 'live' || a.kind === 'observed' ? `● Live${a.kind === 'live' && a.predictionSource === 'propagated' ? ' · stima' : ''}${a.atTerminus ? ' · al capolinea' : ''} · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
+        <View style={s.arrivalTime}><Text style={[s.time, a.kind !== 'scheduled' && s.liveEta]}>{a.time === null || a.atTerminus && a.time < now ? 'In attesa' : Math.ceil((a.time - now) / 60) <= 1 ? 'In arrivo' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.expectedClock]}>{a.time !== null ? `${clock(a.time)} ›` : '›'}</Text></View>
       </GlassPressable>)}
     </>}
   </View>;
@@ -310,6 +316,8 @@ const s = StyleSheet.create({
   bottomDock: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 12 }, bottomBar: { flexDirection: 'row', borderRadius: 32, padding: 6, maxWidth: 460, width: '100%', alignSelf: 'center' },
   bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: 'rgba(150,0,45,0.085)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.9)' }, bottomTabPressed: { backgroundColor: 'rgba(150,0,45,0.12)' }, bottomTabText: { color: '#536373', fontSize: 11, fontWeight: '600' }, bottomTabSelected: { color: '#96002d', fontWeight: '800' },
   content: { flex: 1, paddingHorizontal: 20 }, scroll: { paddingBottom: 140, gap: 14 }, heading: { color: '#202d3a', fontSize: 20, fontWeight: '700', flexShrink: 1 },
+  boardScroll: { paddingBottom: 190 },
+  lineRefreshDock: { position: 'absolute', right: 20 }, lineRefreshButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' }, lineRefreshIcon: { fontSize: 30, color: '#96002d', lineHeight: 34 },
   muted: { color: '#596878', fontSize: 14, lineHeight: 21 }, small: { color: '#596878', fontSize: 11, lineHeight: 16 }, body: { color: '#202d3a', fontSize: 16, fontWeight: '600' },
   expectedClock: { color: '#167450', fontWeight: '800', backgroundColor: '#e2f3e9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   input: { ...glassStyle, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 16, color: '#202d3a', fontSize: 16, marginVertical: 12 },

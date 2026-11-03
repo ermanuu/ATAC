@@ -214,8 +214,12 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
                 source = 'gps'
         forecast = next_arrival(vehicle, group['trips'].get(trip_id), actual_stops or [], reference_index, now, updates, windows)
         prediction_timestamp = None
-        if forecast and (index is None or forecast[0] > index):
-            index, prediction_timestamp = forecast
+        if forecast and forecast.index is not None and (index is None or forecast.index > index):
+            index, prediction_timestamp = forecast.index, forecast.timestamp
+            placement_override, source = 'before', 'predictions'
+            estimated = True
+        if forecast and forecast.upcoming is not None and (index is None or index > forecast.upcoming):
+            index, prediction_timestamp = forecast.upcoming, forecast.timestamp
             placement_override, source = 'before', 'predictions'
             estimated = True
         stopped = vehicle.current_status == pb.VehiclePosition.STOPPED_AT
@@ -224,6 +228,8 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
                 'estimated': estimated, 'placement': placement, 'positionSource': source,
                 'predictionTimestamp': prediction_timestamp, 'referenceStopId': vehicle.stop_id or None,
+                'upcomingStopIndex': forecast.upcoming if forecast else None,
+                'upcomingTimestamp': forecast.timestamp if forecast and forecast.upcoming is not None else None,
                 'retained': entity.id in live.get('retained', ()) or now - timestamp > 90 or not live['available'],
                 'timestampSource': 'vehicle' if vehicle.timestamp and entity.id not in live.get('feedTimestamps', ()) else 'feed',
                 'lat': vehicle.position.latitude if vehicle.HasField('position') else None,

@@ -1,14 +1,23 @@
 """Conservative next-arrival progress, distinct from a geographic GPS position."""
 from datetime import datetime
+from dataclasses import dataclass
 from google.transit import gtfs_realtime_pb2 as pb
 from . import transit as t
-from .realtime_utils import stop_event_index, stop_event_time
+from .realtime_utils import stop_event_index, stop_predictions
+
+
+@dataclass(frozen=True)
+class ArrivalProgress:
+    index: int | None
+    timestamp: int
+    upcoming: int | None
 
 
 def next_arrival(vehicle, trip, stops, start, now, live, windows):
     if start is None or not trip or not live or not live.get('available'):
         return None
     candidates = []
+    bounds = []
     latest = 0
     for entity in live['feed'].entity:
         if entity.is_deleted or not entity.HasField('trip_update'):
@@ -39,12 +48,13 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
         if len(epochs) != 1:
             continue
         if stamp > latest:
-            latest, candidates = stamp, []
+            latest, candidates, bounds = stamp, [], []
         elif stamp < latest:
             continue
         # A newer NO_DATA / dwell / cancellation also supersedes an older
         # forecast that would otherwise move the icon.
         candidates.append(None)
+        bounds.append(None)
         if update.trip.schedule_relationship == pb.TripDescriptor.CANCELED:
             continue
         epoch = epochs[0]
@@ -53,17 +63,20 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
             index = stop_event_index(event, stops)
             if index is not None:
                 events[index] = event
+        predictions = stop_predictions(update, stops, epoch)
 
         def event_times(index):
-            event = events.get(index)
-            if event is None or event.schedule_relationship in (pb.TripUpdate.StopTimeUpdate.NO_DATA, pb.TripUpdate.StopTimeUpdate.SKIPPED):
-                return {}
-            times = {}
-            for field in ('arrival', 'departure'):
-                value = stop_event_time(event, field, epoch + stops[index][field])
-                if value is not None:
-                    times[field] = value
-            return times
+            return predictions.get(index, {})
+
+        # A fresh ETA that is still in the future is an upper bound, including
+        # when GPS projection or an earlier forecast placed this bus too far on.
+        for index, prediction in predictions.items():
+            arrival = prediction.get('arrival', prediction.get('departure'))
+            departure = prediction.get('departure', arrival)
+            if arrival is not None and (now <= arrival <= now + 600 or
+                                        arrival < now <= departure <= now + 600):
+                bounds[-1] = index
+                break
 
         begin = start
         if events and min(events) > start:
@@ -72,6 +85,8 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
             # to stay in the future pins the marker behind the stop board.
             # Keep two consecutive, ordered events as the identity anchor.
             first = min(events)
+            if predictions.get(first, {}).get('source') != 'direct' or predictions.get(first + 1, {}).get('source') != 'direct':
+                continue
             first_times, following_times = event_times(first), event_times(first + 1)
             first_time = first_times.get('arrival', first_times.get('departure'))
             following_time = following_times.get('arrival', following_times.get('departure'))
@@ -79,10 +94,10 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
                 continue
             begin = first
         for index in range(begin, len(stops)):
-            event = events.get(index)
-            if event is None or event.schedule_relationship == pb.TripUpdate.StopTimeUpdate.NO_DATA:
+            prediction = predictions.get(index)
+            if not prediction or prediction.get('noData'):
                 break
-            if event.schedule_relationship == pb.TripUpdate.StopTimeUpdate.SKIPPED:
+            if prediction.get('skipped'):
                 continue
             times = event_times(index)
             arrival = times.get('arrival', times.get('departure'))
@@ -108,4 +123,7 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
     if not candidates:
         return None
     indices = set(candidates)
-    return (indices.pop(), latest) if len(indices) == 1 and None not in indices else None
+    index = indices.pop() if len(indices) == 1 and None not in indices else None
+    limits = set(bounds)
+    upcoming = limits.pop() if len(limits) == 1 and None not in limits else None
+    return ArrivalProgress(index, latest, upcoming) if index is not None or upcoming is not None else None

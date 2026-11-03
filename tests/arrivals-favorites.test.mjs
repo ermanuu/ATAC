@@ -27,6 +27,35 @@ test('expired forecasts fall back to schedules and no longer hide untracked trip
  const result=visibleArrivals([a('live',1200,'live',{scheduledTime:1180,predictionTimestamp:800}),a('scheduled',1300)],1000,true);
  assert.deepEqual(result.map(x=>[x.tripId,x.kind,x.time]),[['live','scheduled',1180],['scheduled','scheduled',1300]]);
 });
+test('an observed terminal bus remains visible even without its own live ETA',()=>{
+ const result=visibleArrivals([a('known-terminal',1100,'scheduled',{vehicleId:'2687',atTerminus:true,atTerminusTimestamp:950}),a('other-live',1400,'live',{vehicleId:'2789',predictionTimestamp:950}),a('untracked',1300)],1000,true);
+ assert.deepEqual(result.map(x=>x.tripId),['other-live','known-terminal']);
+ assert.equal(result[1].kind,'observed');
+ assert.equal(result[1].time,null);
+});
+test('terminal status expires using its position time independently of ETA availability',()=>{
+ const bus=a('terminal',1300,'scheduled',{vehicleId:'2687',atTerminus:true,atTerminusTimestamp:900});
+ assert.equal(visibleArrivals([bus],1080,false)[0].atTerminus,true);
+ const expired=visibleArrivals([bus],1081,false)[0];
+ assert.equal(expired.atTerminus,false);
+ assert.equal(expired.vehicleId,null);
+ assert.equal(visibleArrivals([{...bus,atTerminusTimestamp:1200}],1081,true)[0].atTerminus,false);
+});
+test('a bus observed waiting at origin survives its past timetable until the observation expires',()=>{
+ const bus=a('late-terminal',900,'scheduled',{vehicleId:'2687',atTerminus:true,atTerminusTimestamp:950});
+ const result=visibleArrivals([bus,a('untracked-past',900)],1000,true);
+ assert.deepEqual(result.map(x=>x.tripId),['late-terminal']);
+ assert.equal(result[0].time,null);
+ assert.deepEqual(visibleArrivals([bus],1131,true),[]);
+});
+test('a live presence without an ETA never displays a timetable as its arrival time',()=>{
+ const bus=a('observed',null,'observed',{scheduledTime:1300,vehicleId:'2687',atTerminus:true,atTerminusTimestamp:950});
+ assert.equal(visibleArrivals([bus],1000,false)[0].time,null);
+ const expired=visibleArrivals([bus],1131,false)[0];
+ assert.equal(expired.kind,'scheduled');
+ assert.equal(expired.time,1300);
+ assert.equal(expired.atTerminus,false);
+});
 test('favorites survive serialization, are unique by exact stop ID and can be removed',()=>{
  const one={stop_id:'74373',name:'OCEANO ATLANTICO/PAVESE'};const two={stop_id:'74374',name:'OCEANO ATLANTICO/COLOMBO'};
  let list=toggleFavoriteStop([],one);list=toggleFavoriteStop(list,two);
