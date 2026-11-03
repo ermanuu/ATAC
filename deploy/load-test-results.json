@@ -1,0 +1,62 @@
+{
+  "date": "2026-11-03",
+  "environment": "local managed cloud; HTTP loopback; server affinity limited to two CPUs",
+  "data": "646 MiB GTFS database; captured full Rome feeds replayed with advancing timestamps and 200 ms simulated download delay",
+  "endpoints": 43,
+  "cases": {
+    "cold_burst": {
+      "users": 100,
+      "endpoints": 43,
+      "interval_seconds": 10.0,
+      "burst": true,
+      "duration_seconds": 3.63,
+      "requests": 100,
+      "errors": 0,
+      "requests_per_second": 27.53,
+      "latency_ms": {
+        "median": 2222.9,
+        "p95": 3371.0,
+        "p99": 3461.8,
+        "max": 3468.2
+      },
+      "error_examples": []
+    },
+    "steady": {
+      "users": 100,
+      "endpoints": 43,
+      "interval_seconds": 10.0,
+      "burst": false,
+      "duration_seconds": 59.96,
+      "requests": 600,
+      "errors": 0,
+      "requests_per_second": 10.01,
+      "latency_ms": {
+        "median": 25.4,
+        "p95": 135.6,
+        "p99": 358.4,
+        "max": 485.0
+      },
+      "error_examples": []
+    },
+    "margin_with_one_journey_plan": {
+      "users": 100,
+      "endpoints": 43,
+      "interval_seconds": 5.0,
+      "burst": false,
+      "duration_seconds": 29.99,
+      "requests": 600,
+      "errors": 0,
+      "requests_per_second": 20.0,
+      "latency_ms": {
+        "median": 46.6,
+        "p95": 306.6,
+        "p99": 581.7,
+        "max": 680.6
+      },
+      "error_examples": []
+    }
+  },
+  "single_journey_plan_ms": 17975.4,
+  "limits": "Not measured on the production VM; excludes Internet/TLS and browser rendering; routing admitted one calculation at a time.",
+  "server_peak_rss_mib": 273.3
+}

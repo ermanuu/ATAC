@@ -9,11 +9,13 @@ import threading
 import time
 import urllib.request
 import zipfile
-from contextlib import closing, contextmanager
+from concurrent.futures import Future
+from contextlib import closing, contextmanager, nullcontext
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from google.transit import gtfs_realtime_pb2
+from .cache import SharedCache
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -23,10 +25,43 @@ STATIC_URL = BASE + "rome_static_gtfs.zip"
 VEHICLES_URL = BASE + "rome_rtgtfs_vehicle_positions_feed.pb"
 UPDATES_URL = BASE + "rome_rtgtfs_trip_updates_feed.pb"
 ROME = ZoneInfo("Europe/Rome")
+# SQLite releases the GIL while stepping rows: overlapping large scans are
+# substantially slower than short queued reads on the 2-vCPU deployment.
+# Cached responses and network downloads do not acquire this gate.
+_database_reads = threading.RLock()
+_stop_metadata = SharedCache(max_entries=2, max_weight=20000, weight=len)
+_trip_stops = SharedCache(max_entries=4096, max_weight=100000, weight=len)
 
 
 class Unavailable(Exception):
     pass
+
+
+def database_version():
+    try:
+        stat = DB.stat()
+        return (str(DB), stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    except FileNotFoundError:
+        return (str(DB), None)
+
+
+class Connection(sqlite3.Connection):
+    """Remember the dataset opened, even if a daily import replaces its path."""
+    generation = None
+
+
+def stop_metadata(db):
+    return _stop_metadata.get(db.generation,
+                              lambda: {row['stop_id']: dict(row) for row in db.execute('SELECT * FROM stops')},
+                              ttl=3600)
+
+
+def trip_stops(db, trip_id):
+    def build():
+        metadata = stop_metadata(db)
+        return [dict(row) | metadata[row['stop_id']] for row in db.execute(
+            'SELECT stop_id,sequence,arrival,departure,pickup FROM times WHERE trip_id=? ORDER BY sequence', (trip_id,))]
+    return _trip_stops.get((db.generation, trip_id), build, ttl=3600)
 
 
 def download(url, timeout=60):
@@ -41,15 +76,22 @@ def seconds(value):
 
 
 @contextmanager
-def connect():
-    if not DB.exists():
-        raise Unavailable("Orari non ancora importati. Eseguire python -m server.import_gtfs.")
-    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    db.row_factory = sqlite3.Row
-    try:
-        yield db
-    finally:
-        db.close()
+def connect(serialized=True):
+    with _database_reads if serialized else nullcontext():
+        while True:
+            generation = database_version()
+            if generation[-1] is None:
+                raise Unavailable("Orari non ancora importati. Eseguire python -m server.import_gtfs.")
+            db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, factory=Connection)
+            if generation == database_version():
+                break
+            db.close()
+        db.generation = generation
+        db.row_factory = sqlite3.Row
+        try:
+            yield db
+        finally:
+            db.close()
 
 
 def import_gtfs(payload):
@@ -147,6 +189,10 @@ class Realtime:
     def __init__(self):
         self.lock = threading.Lock()
         self.cache = {}
+        self.pending = {}
+        self.revision = 0
+        self.stopping = threading.Event()
+        self.workers = []
         from .positions import MarkerHistory, PositionHistory
         self.positions = PositionHistory()
         self.markers = MarkerHistory()
@@ -155,27 +201,92 @@ class Realtime:
         with self.lock:
             cached = self.cache.get(kind)
             now = time.time()
-            ttl = 10
-            if not force and cached and now - cached[0] < ttl:
-                value = cached[1]
-                if not value["available"] or -60 <= now - value["timestamp"] <= 180:
-                    return value
-            try:
-                feed = gtfs_realtime_pb2.FeedMessage()
-                feed.ParseFromString(download(VEHICLES_URL if kind == "vehicles" else UPDATES_URL, timeout=10))
-                timestamp = int(feed.header.timestamp)
-                if feed.header.incrementality == gtfs_realtime_pb2.FeedHeader.DIFFERENTIAL:
-                    raise ValueError("Feed differenziale non supportato")
-                if not timestamp or timestamp > now + 60 or now - timestamp > 180:
-                    raise ValueError("Feed assente, scaduto o con timestamp non valido")
-                result = {"available": True, "timestamp": timestamp, "feed": feed}
-            except Exception as exc:
-                result = {"available": False, "timestamp": None, "error": str(exc), "feed": None}
-            if kind == "vehicles":
-                merged, retained, feed_timestamps = self.positions.merge(result['feed'], now)
-                result.update(feed=merged, retained=retained, feedTimestamps=feed_timestamps)
-            self.cache[kind] = (now, result)
+            valid = cached and (not cached[1]['available'] or -60 <= now - cached[1]['timestamp'] <= 180)
+            # A burst of page openings / manual refreshes shares a download.
+            # After two seconds a forced request may bypass the normal 10 s TTL.
+            if valid and 0 <= now - cached[0] < (2 if force else 10):
+                return cached[1]
+            pending = self.pending.get(kind)
+            if pending is not None:
+                # A slow source must not block readers of an unexpired snapshot.
+                if valid and not force:
+                    return cached[1]
+                owner = False
+            elif valid and self.workers and not force:
+                # The independent background loop refreshes this feed on cadence.
+                return cached[1]
+            else:
+                pending = self.pending[kind] = Future()
+                owner = True
+        if not owner:
+            return pending.result()
+        try:
+            result = self.fetch(kind)
+            with self.lock:
+                self.cache[kind] = (time.time(), result)
+                self.revision += 1
+                del self.pending[kind]
+            pending.set_result(result)
             return result
+        except BaseException as exc:
+            with self.lock:
+                self.pending.pop(kind, None)
+            pending.set_exception(exc)
+            raise
+
+    def fetch(self, kind):
+        try:
+            feed = gtfs_realtime_pb2.FeedMessage()
+            feed.ParseFromString(download(VEHICLES_URL if kind == 'vehicles' else UPDATES_URL, timeout=10))
+            now = time.time()
+            timestamp = int(feed.header.timestamp)
+            if feed.header.incrementality == gtfs_realtime_pb2.FeedHeader.DIFFERENTIAL:
+                raise ValueError('Feed differenziale non supportato')
+            if not timestamp or timestamp > now + 60 or now - timestamp > 180:
+                raise ValueError('Feed assente, scaduto o con timestamp non valido')
+            result = {'available': True, 'timestamp': timestamp, 'feed': feed}
+        except Exception as exc:
+            result = {'available': False, 'timestamp': None, 'error': str(exc), 'feed': None}
+        if kind == 'vehicles':
+            merged, retained, feed_timestamps = self.positions.merge(result['feed'], time.time())
+            result.update(feed=merged, retained=retained, feedTimestamps=feed_timestamps)
+        if result.get('feed') is not None:
+            by_trip, by_vehicle, by_route = {}, {}, {}
+            for entity in result['feed'].entity:
+                field = 'vehicle' if kind == 'vehicles' else 'trip_update'
+                if entity.is_deleted or not entity.HasField(field):
+                    continue
+                value = getattr(entity, field)
+                by_trip.setdefault(value.trip.trip_id, []).append(entity)
+                by_route.setdefault(value.trip.route_id, []).append(entity)
+                for field in ('id', 'label'):
+                    identifier = getattr(value.vehicle, field)
+                    if identifier:
+                        by_vehicle.setdefault((field, identifier), []).append(entity)
+            result.update(byTrip=by_trip, byVehicle=by_vehicle, byRoute=by_route)
+        return result
+
+    def start(self):
+        if self.workers:
+            return
+        self.stopping.clear()
+
+        def poll(kind):
+            while not self.stopping.is_set():
+                started = time.monotonic()
+                self.read(kind, force=True)
+                self.stopping.wait(max(0, 10 - (time.monotonic() - started)))
+
+        self.workers = [threading.Thread(target=poll, args=(kind,), daemon=True, name=f'feed-{kind}')
+                        for kind in ('vehicles', 'updates')]
+        for worker in self.workers:
+            worker.start()
+
+    def stop(self):
+        self.stopping.set()
+        for worker in self.workers:
+            worker.join(timeout=1)
+        self.workers = []
 
 
 realtime = Realtime()
@@ -195,7 +306,7 @@ def status(refresh=False):
             result["serviceToday"] = bool(active_services(db, datetime.now(ROME).date()))
     for kind in ("vehicles", "updates"):
         live = read_live(kind, refresh)
-        result[kind] = {k: v for k, v in live.items() if k != "feed"}
+        result[kind] = {k: v for k, v in live.items() if k in ('available', 'timestamp', 'error', 'retained', 'feedTimestamps')}
     return result
 
 
@@ -227,7 +338,7 @@ def arrivals(stop_id, refresh=False):
             for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
                 if r["service_id"] in active:
                     if r["trip_id"] not in variants:
-                        patterns[r['trip_id']] = [dict(s) for s in db.execute("SELECT ti.stop_id,ti.sequence,ti.arrival,ti.departure,s.lat,s.lon FROM times ti JOIN stops s ON s.stop_id=ti.stop_id WHERE ti.trip_id=? ORDER BY ti.sequence", (r["trip_id"],))]
+                        patterns[r['trip_id']] = trip_stops(db, r['trip_id'])
                         stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
                     scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": service_date})
@@ -327,7 +438,9 @@ def plan(origin, destination, now=None):
     now = int(time.time()) if now is None else now
     if origin == destination:
         raise ValueError("Scegli due fermate diverse")
-    with connect() as db:
+    # The long routing scan must not hold the gate used by short live reads.
+    # The HTTP layer admits one routing calculation at a time.
+    with connect(serialized=False) as db:
         for stop in (origin, destination):
             if not db.execute("SELECT 1 FROM stops WHERE stop_id=?", (stop,)).fetchone():
                 raise ValueError("Fermata non valida")

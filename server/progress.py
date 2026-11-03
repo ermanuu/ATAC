@@ -33,7 +33,11 @@ def has_newer_assignment(vehicle, position_timestamp, now, live):
     if not live or not live.get('available'):
         return False
     assignments = set()
-    for entity in live['feed'].entity:
+    entities = live['feed'].entity
+    if 'byVehicle' in live:
+        entities = {id(entity): entity for field in ('id', 'label')
+                    for entity in live['byVehicle'].get((field, getattr(vehicle.vehicle, field)), ())}.values()
+    for entity in entities:
         if entity.is_deleted or not entity.HasField('trip_update'):
             continue
         update = entity.trip_update
@@ -57,7 +61,8 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
     candidates = []
     bounds = []
     latest = 0
-    for entity in live['feed'].entity:
+    entities = live['byTrip'].get(vehicle.trip.trip_id, ()) if 'byTrip' in live else live['feed'].entity
+    for entity in entities:
         if entity.is_deleted or not entity.HasField('trip_update'):
             continue
         update = entity.trip_update

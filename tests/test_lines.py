@@ -1,6 +1,7 @@
 """Direction boards: time bounds, variants, GTFS-RT positioning and cancellation."""
 from datetime import datetime
 from pathlib import Path
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -70,6 +71,20 @@ class LineTests(unittest.TestCase):
         self.assertNotIn('vehicles', result)
         self.read.assert_not_called()
         self.assertEqual(result['variants'][0]['fromName'], 'Origine')
+
+    def test_cached_catalog_is_invalidated_by_an_atomic_dataset_replacement(self):
+        from server import lines
+        with patch.object(lines, 'load_patterns', wraps=lines.load_patterns) as load:
+            first = self.board()
+            self.assertEqual(self.board()['stops'], first['stops'])
+            self.assertEqual(load.call_count, 1)
+            replacement = t.DB.with_name('replacement.sqlite')
+            with sqlite3.connect(t.DB) as source, sqlite3.connect(replacement) as target:
+                source.backup(target)
+                target.execute("UPDATE stops SET name='Nuova origine' WHERE stop_id='a'")
+            os.replace(replacement, t.DB)
+            self.assertEqual(self.board()['stops'][0]['name'], 'Nuova origine')
+            self.assertEqual(load.call_count, 2)
 
     def test_picker_excludes_finished_and_later_variants(self):
         self.add_trip('school', 8*3600, headsign='Scuola')
@@ -332,6 +347,20 @@ class LineTests(unittest.TestCase):
         self.assertEqual(item['positionSource'],'predictions')
         self.assertEqual(item['timestamp'],self.now-30)
         self.assertEqual(item['predictionTimestamp'],self.now)
+
+    def test_indexed_feeds_preserve_progress_and_vehicles_without_a_route_id(self):
+        v, _ = self.rome_forecast()
+        v.trip.ClearField('route_id')
+        for kind in ('vehicles', 'updates'):
+            payload = self.feeds[kind]['feed'].SerializeToString()
+            with patch.object(t, 'download', return_value=payload), patch.object(t.time, 'time', return_value=self.now):
+                self.feeds[kind] = t.Realtime().read(kind)
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        item = board['stops'][2]['vehiclesBefore'][0]
+        self.assertEqual(item['vehicleId'], '2641')
+        self.assertEqual(item['positionSource'], 'predictions')
+        self.assertFalse(item['retained'])
 
     def test_missing_forecast_does_not_restore_stale_upstream_reference(self):
         v, _ = self.rome_forecast()
