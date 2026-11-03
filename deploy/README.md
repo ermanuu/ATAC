@@ -134,3 +134,50 @@ alla distribuzione una capacità garantita. Il test dei poll non simula cento
 calcoli di percorso simultanei o il rendering dei browser.
 
 I risultati misurati nell’ambiente cloud sono in [PERFORMANCE.md](PERFORMANCE.md).
+
+### Prova con 10.000 utenti virtuali
+
+Il generatore asincrono accetta fino a 10.000 visitatori virtuali e riutilizza
+un insieme limitato di connessioni HTTP. Non crea un thread o una connessione
+per ciascun visitatore. L’aggiornamento con `sudo aggiorna-romabus` installa
+automaticamente anche la dipendenza `aiohttp`.
+
+```sh
+cd /opt/romabus
+.venv/bin/python scripts/load-test.py --users 10000 --duration 60 --interval 10 --connections 256 --output /tmp/romabus-load-10000.json
+```
+
+Questa prova pianifica 60.000 richieste in un minuto, circa 1.000 al secondo.
+`--connections` imposta il numero massimo di richieste HTTP attive del client,
+indipendentemente dal numero di utenti virtuali. `--burst` allinea i poll di
+tutti gli utenti e produce ondate di 10.000 richieste, anziché distribuirle
+uniformemente nei dieci secondi.
+
+Per misurare la sola capacità del server, eseguire il generatore da un’altra
+macchina con il repository e le dipendenze installate, aggiungendo
+`--base-url https://romabus.duckdns.org`. Il test avviato sulla VM condivide CPU
+e RAM con il server e misura il costo di entrambi. Le prove da Internet includono
+anche HTTPS, il reverse proxy e la rete.
+
+Il report distingue:
+
+- `target_requests_per_second`: carico previsto dalla configurazione.
+- `offered_requests_per_second`: richieste effettivamente avviate nella finestra
+  di misura; `missed_requests` conta quelle mancanti rispetto al piano.
+- `errors`: errori HTTP, di rete o timeout dopo l’avvio della richiesta.
+- `generator_queue_timeouts`: poll scaduti aspettando una connessione del client.
+- `latency_ms`: attesa complessiva, inclusa la coda del client;
+  `http_latency_ms` misura il tempo dalla disponibilità di una connessione.
+- `client_queue_ms` e `scheduler_lag_ms`: coda e ritardo del generatore.
+
+Ogni visitatore attende la conclusione di un poll lento prima di riprendere i
+successivi; i poll saltati restano visibili nel confronto con il piano. I timeout
+comprendono sia la coda del client sia la richiesta HTTP. `drain_seconds` indica
+il tempo usato dopo la finestra di misura per completare richieste già iniziate.
+
+`load_target_met` è vero se almeno il 99% dei poll previsti viene avviato nella
+finestra configurata. Il comando termina con codice 1 se questo obiettivo non
+è raggiunto o se ci sono errori o timeout in coda: zero errori HTTP da solo non
+dimostra che il server abbia ricevuto tutto il carico richiesto. Le connessioni
+riutilizzate rendono i tempi del nuovo client diversi dai test precedenti che
+aprivano una connessione per ogni richiesta.
