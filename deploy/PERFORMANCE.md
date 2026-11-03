@@ -51,3 +51,23 @@ Per la verifica sulla VM da 2 vCPU e 4 GB usare il comando in [README.md](README
 controllando anche CPU, RAM ed errori del servizio. I test automatici verificano
 separatamente concorrenza dei download, cache, invalidazione del database,
 scadenza delle posizioni e avanzamento delle icone.
+
+## Generatore asincrono per 10.000 visitatori
+
+Il client aggiornato usa coroutine e un insieme limitato di connessioni HTTP
+riutilizzate. La verifica del generatore ha eseguito **20.000 richieste** con
+10.000 utenti virtuali in 20 secondi, 256 connessioni massime, zero errori e
+circa 1.000 richieste al secondo. Il processo client ha raggiunto circa 60 MiB
+di RAM e quattro thread, incluso un thread aggiunto per osservare le risorse.
+
+Questa verifica usa un endpoint HTTP locale di prova con risposte JSON compresse,
+su un ambiente cloud senza affinità imposta alle CPU. Misura il generatore;
+non dimostra la capacità della webapp o della VM pubblica con 10.000 utenti.
+Il report è in [load-generator-validation.json](load-generator-validation.json).
+
+Le prove limitate ai core condivisi dell’ambiente cloud hanno completato le
+richieste ma sono rimaste sotto il carico previsto. Il report le ha segnalate
+con `load_target_met=false` anche in assenza di errori HTTP. Per interpretare
+una prova ad alto carico occorre quindi considerare il traffico effettivamente
+inviato, il ritardo dello scheduler e la coda del client. Confrontare i nuovi
+tempi anche tenendo conto del riuso delle connessioni, assente nel vecchio client.

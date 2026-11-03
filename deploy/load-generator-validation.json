@@ -1,0 +1,51 @@
+{
+  "scope": "Generator validation against a local synthetic gzip JSON HTTP endpoint; not a webapp capacity test.",
+  "cpu_affinity": "Unrestricted in managed cloud; not the production VM.",
+  "client_peak_rss_mib": 59.8,
+  "peak_client_threads_including_resource_observer": 4,
+  "report": {
+    "users": 10000,
+    "connections": 256,
+    "endpoints": 10,
+    "interval_seconds": 10.0,
+    "burst": false,
+    "scheduled_duration_seconds": 20.0,
+    "duration_seconds": 20.02,
+    "drain_seconds": 0.02,
+    "target_requests_per_second": 1000.0,
+    "expected_requests": 20000,
+    "requests": 20000,
+    "errors": 0,
+    "requests_started_in_window": 19996,
+    "missed_requests": 4,
+    "generator_queue_timeouts": 0,
+    "load_target_met": true,
+    "requests_per_second": 999.0,
+    "offered_requests_per_second": 999.8,
+    "latency_ms": {
+      "median": 6.6,
+      "p95": 1076.7,
+      "p99": 1209.2,
+      "max": 1240.3
+    },
+    "http_latency_ms": {
+      "median": 6.4,
+      "p95": 150.3,
+      "p99": 254.7,
+      "max": 652.8
+    },
+    "client_queue_ms": {
+      "median": 0.0,
+      "p95": 918.1,
+      "p99": 1151.9,
+      "max": 1190.0
+    },
+    "scheduler_lag_ms": {
+      "median": 6.1,
+      "p95": 1556.6,
+      "p99": 2179.5,
+      "max": 2279.3
+    },
+    "error_examples": []
+  }
+}
