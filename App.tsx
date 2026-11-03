@@ -266,11 +266,11 @@ export function Stops() {
     {!!navigationError && <Notice text={navigationError} />}
     {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
     {state.data && <>
-      <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : arrivals.some(a => a.kind === 'observed') ? 'Posizioni live disponibili · tempi di arrivo non disponibili' : 'Previsioni live non disponibili · solo orari programmati'}</Text>
+      <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={s.route} onPress={() => { void openArrival(a); }}>
-        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind !== 'scheduled' && { color: '#167450' }]}>{a.kind === 'live' || a.kind === 'observed' ? `● Live${a.kind === 'live' && a.predictionSource === 'propagated' ? ' · stima' : ''}${a.atTerminus ? ' · al capolinea' : ''} · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
-        <View style={s.arrivalTime}><Text style={[s.time, a.kind !== 'scheduled' && s.liveEta]}>{a.time === null || a.atTerminus && a.time < now ? 'In attesa' : Math.ceil((a.time - now) / 60) <= 1 ? 'In arrivo' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.expectedClock]}>{a.time !== null ? `${clock(a.time)} ›` : '›'}</Text></View>
+        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: '#167450' }]}>{a.kind === 'live' ? `● Live${a.atTerminus ? ' · al capolinea' : ''} · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
+        <View style={s.arrivalTime}><Text style={[s.time, a.kind === 'live' && s.liveEta]}>{Math.ceil((a.time - now) / 60) <= 1 ? 'In arrivo' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.expectedClock]}>{clock(a.time)} ›</Text></View>
       </GlassPressable>)}
     </>}
   </View>;

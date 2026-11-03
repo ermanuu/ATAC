@@ -22,7 +22,7 @@ def stop_event_index(event, stops):
     return None
 
 
-def stop_predictions(update, stops, epoch):
+def stop_predictions(update, stops, epoch, propagate=True):
     """Resolve direct events and GTFS-RT forward delay propagation.
 
     Omitted stops inherit the last live delay until the next explicit update.
@@ -55,6 +55,6 @@ def stop_predictions(update, stops, epoch):
             field = 'departure' if 'departure' in times else 'arrival'
             delay = times[field] - int(epoch + stop[field])
             result[index] = times | {'source': 'direct'}
-        elif delay is not None:
+        elif propagate and delay is not None:
             result[index] = {field: int(epoch + stop[field] + delay) for field in ('arrival', 'departure')} | {'source': 'propagated'}
     return result
