@@ -4,10 +4,18 @@ from datetime import datetime
 import hashlib
 import json
 import math
+import os
 import time
 
 from google.transit import gtfs_realtime_pb2 as pb
 from . import transit as t
+from .cache import SharedCache
+
+
+# The weight is the number of cached stop-time rows, rather than just routes.
+# Large lines cannot make the static cache grow without a bound.
+_patterns = SharedCache(max_entries=128, max_weight=int(os.getenv('PATTERN_CACHE_ROWS', '200000')),
+                        weight=lambda value: sum(map(len, value[1].values())))
 
 
 def variant_id(direction, headsign, stop_ids):
@@ -17,15 +25,26 @@ def variant_id(direction, headsign, stop_ids):
 
 def patterns(db, route_id, now):
     windows = list(t.service_windows(db, now, 3600))
+    key = (db.generation, route_id, tuple((epoch, frozenset(active)) for epoch, active in windows))
+    groups, sequences = _patterns.get(key, lambda: load_patterns(db, route_id, windows), ttl=3600)
+    return groups, sequences, windows
+
+
+def load_patterns(db, route_id, windows):
     services = set().union(*(active for _, active in windows))
     trips = {r['trip_id']: dict(r) for r in db.execute(
         'SELECT * FROM trips WHERE route_id=? ORDER BY trip_id', (route_id,)) if r['service_id'] in services}
     sequences = defaultdict(list)
-    for row in db.execute('''SELECT ti.trip_id,ti.sequence,ti.arrival,ti.departure,ti.pickup,s.* FROM times ti
-                            JOIN trips tr ON tr.trip_id=ti.trip_id JOIN stops s ON s.stop_id=ti.stop_id
-                            WHERE tr.route_id=? ORDER BY ti.trip_id,ti.sequence''', (route_id,)):
-        if row['trip_id'] in trips:
-            sequences[row['trip_id']].append(dict(row))
+    if not trips:
+        return [], sequences
+    metadata = t.stop_metadata(db)
+    placeholders = ','.join('?' for _ in services)
+    for row in db.execute(f'''SELECT ti.trip_id,ti.stop_id,ti.sequence,ti.arrival,ti.departure,ti.pickup FROM times ti
+                             JOIN trips tr ON tr.trip_id=ti.trip_id
+                             WHERE tr.route_id=? AND tr.service_id IN ({placeholders})''', (route_id, *services)):
+        sequences[row['trip_id']].append(dict(row) | metadata[row['stop_id']])
+    for stops in sequences.values():
+        stops.sort(key=lambda stop: stop['sequence'])
     groups = {}
     for trip_id, trip in trips.items():
         stops = sequences[trip_id]
@@ -38,7 +57,7 @@ def patterns(db, route_id, now):
                            'fromName': stops[0]['name'], 'toName': stops[-1]['name'], 'stopCount': len(stops),
                            'stops': stops, 'trips': {}}
         groups[key]['trips'][trip_id] = trip
-    return sorted(groups.values(), key=lambda g: (g['direction'], g['headsign'], g['fromName'], g['id'])), sequences, windows
+    return sorted(groups.values(), key=lambda g: (g['direction'], g['headsign'], g['fromName'], g['id'])), sequences
 
 
 def summary(group):
@@ -138,7 +157,10 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
         return stops, 0
     unplaced = 0
     selected_ids = tuple(s['stop_id'] for s in stops)
-    for entity in live['feed'].entity:
+    route_id = next(iter(group['trips'].values()))['route_id']
+    entities = (live['byRoute'].get(route_id, []) + live['byRoute'].get('', [])
+                if 'byRoute' in live else live['feed'].entity)
+    for entity in entities:
         if entity.is_deleted or not entity.HasField('vehicle'):
             continue
         vehicle = entity.vehicle

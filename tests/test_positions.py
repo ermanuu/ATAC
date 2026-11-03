@@ -1,5 +1,7 @@
 """Incomplete snapshots must not flicker or keep vehicles indefinitely."""
 import unittest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from server import transit as t
 from google.transit import gtfs_realtime_pb2 as pb
@@ -82,13 +84,85 @@ class PositionsTests(unittest.TestCase):
         self.assertEqual(merged.entity[0].vehicle.current_stop_sequence,3)
         self.assertEqual(merged.entity[0].vehicle.timestamp,1030)
 
-    def test_force_refresh_bypasses_realtime_cache(self):
+    def test_force_refresh_bypasses_ttl_but_coalesces_a_two_second_burst(self):
         reader=t.Realtime()
-        with patch.object(t.time,'time',return_value=1000), patch.object(t,'download',return_value=feed(1000).SerializeToString()) as fetch:
+        with patch.object(t.time,'time',return_value=1000) as clock, patch.object(t,'download',return_value=feed(1000).SerializeToString()) as fetch:
             reader.read('vehicles'); reader.read('vehicles')
             self.assertEqual(fetch.call_count,1)
             reader.read('vehicles',force=True)
+            self.assertEqual(fetch.call_count,1)
+            clock.return_value = 1002
+            reader.read('vehicles',force=True)
             self.assertEqual(fetch.call_count,2)
+
+    def test_concurrent_first_requests_share_one_download(self):
+        reader = t.Realtime()
+        entered, release = threading.Event(), threading.Event()
+        barrier = threading.Barrier(10)
+
+        def download(*args, **kwargs):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return feed(1000).SerializeToString()
+
+        def request():
+            barrier.wait(timeout=3)
+            return reader.read('vehicles', force=True)
+
+        with patch.object(t.time, 'time', return_value=1000), patch.object(t, 'download', side_effect=download) as fetch, ThreadPoolExecutor(max_workers=10) as pool:
+            requests = [pool.submit(request) for _ in range(10)]
+            try:
+                self.assertTrue(entered.wait(3))
+            finally:
+                release.set()
+            self.assertTrue(all(request.result(timeout=3)['available'] for request in requests))
+            self.assertEqual(fetch.call_count, 1)
+
+    def test_slow_forced_download_does_not_block_cached_readers_or_the_other_feed(self):
+        reader = t.Realtime()
+        entered, release = threading.Event(), threading.Event()
+        with patch.object(t.time, 'time', return_value=1000) as clock, patch.object(t, 'download', return_value=feed(1000).SerializeToString()) as fetch, ThreadPoolExecutor(max_workers=3) as pool:
+            original = reader.read('vehicles')
+            clock.return_value = 1003
+
+            def download(url, **kwargs):
+                if url == t.VEHICLES_URL:
+                    entered.set()
+                    self.assertTrue(release.wait(3))
+                return feed(1003).SerializeToString()
+
+            fetch.side_effect = download
+            refresh = pool.submit(reader.read, 'vehicles', True)
+            try:
+                self.assertTrue(entered.wait(3))
+                self.assertIs(pool.submit(reader.read, 'vehicles').result(timeout=1), original)
+                self.assertTrue(pool.submit(reader.read, 'updates').result(timeout=1)['available'])
+            finally:
+                release.set()
+            self.assertEqual(refresh.result(timeout=3)['timestamp'], 1003)
+
+    def test_background_polling_preserves_header_expiry_and_can_stop(self):
+        reader = t.Realtime()
+        seen = set()
+        ready = threading.Event()
+
+        def download(url, **kwargs):
+            seen.add(url)
+            if len(seen) == 2:
+                ready.set()
+            return feed(1000).SerializeToString()
+
+        with patch.object(t.time, 'time', return_value=1000) as clock, patch.object(t, 'download', side_effect=download):
+            reader.start()
+            workers = list(reader.workers)
+            try:
+                self.assertTrue(ready.wait(3))
+                reader.read('vehicles', force=True)
+                clock.return_value = 1181
+                self.assertFalse(reader.read('vehicles')['available'])
+            finally:
+                reader.stop()
+            self.assertTrue(all(not worker.is_alive() for worker in workers))
 
     def test_download_failure_preserves_bounded_last_known_feed(self):
         reader = t.Realtime()
