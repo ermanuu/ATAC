@@ -131,7 +131,7 @@ def gps_segment(lat, lon, stops, preferred=None):
 
 
 def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()):
-    from .progress import next_arrival
+    from .progress import has_newer_assignment, next_arrival
     stops = [{k: v for k, v in s.items() if k not in ('trip_id', 'departure', 'pickup')} |
              {'vehiclesAt': [], 'vehiclesBefore': []} for s in group['stops']]
     if not live.get('feed'):
@@ -165,6 +165,8 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
         if actual_route and actual_route != group['trips'][next(iter(group['trips']))]['route_id']:
             continue
         if vehicle.trip.schedule_relationship in (pb.TripDescriptor.CANCELED,):
+            continue
+        if has_newer_assignment(vehicle, timestamp, now, updates):
             continue
         index = None
         estimated = False
@@ -212,7 +214,9 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
                 index = nearest
                 estimated = True
                 source = 'gps'
-        forecast = next_arrival(vehicle, group['trips'].get(trip_id), actual_stops or [], reference_index, now, updates, windows)
+        forecast = None
+        if live['available'] and entity.id not in live.get('retained', ()):
+            forecast = next_arrival(vehicle, group['trips'].get(trip_id), actual_stops or [], reference_index, now, updates, windows)
         prediction_timestamp = None
         if forecast and forecast.index is not None and (index is None or forecast.index > index):
             index, prediction_timestamp = forecast.index, forecast.timestamp

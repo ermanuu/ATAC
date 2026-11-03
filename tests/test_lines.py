@@ -447,6 +447,89 @@ class LineTests(unittest.TestCase):
         self.assertTrue(board['stops'][2]['vehiclesBefore'])
         self.assertFalse(board['stops'][3]['vehiclesBefore'])
 
+    def test_last_passed_stop_advances_to_terminal_without_a_terminal_eta(self):
+        _, u = self.future_only_forecast()
+        u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now - 10
+        u.stop_time_update[1].schedule_relationship = pb.TripUpdate.StopTimeUpdate.NO_DATA
+        board = self.board('RO TELLINI')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertFalse(board['stops'][2]['vehiclesBefore'])
+        self.assertEqual(board['stops'][3]['vehiclesBefore'][0]['vehicleId'], '2610')
+
+    def test_a_direct_passage_overrides_an_inconsistent_propagated_eta_upstream(self):
+        v, u = self.future_only_forecast()
+        u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now - 10
+        u.stop_time_update[1].schedule_relationship = pb.TripUpdate.StopTimeUpdate.NO_DATA
+        # An old origin event would propagate a future timetable-based ETA at
+        # b, although the direct event at the later c is already in the past.
+        event = u.stop_time_update.add(); event.stop_sequence = 10
+        event.departure.time = self.now - 30
+        board = self.board('RO TELLINI')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertEqual(board['stops'][3]['vehiclesBefore'][0]['id'], v.vehicle.id)
+
+    def test_one_recent_arrival_with_a_future_departure_does_not_leave_that_stop(self):
+        _, u = self.future_only_forecast()
+        u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now - 10
+        u.stop_time_update[0].departure.time = self.now + 20
+        u.stop_time_update[1].schedule_relationship = pb.TripUpdate.StopTimeUpdate.NO_DATA
+        board = self.board('RO TELLINI')
+        self.assertTrue(board['stops'][2]['vehiclesBefore'])
+        self.assertFalse(board['stops'][3]['vehiclesBefore'])
+
+    def test_an_omitted_bus_is_not_moved_using_only_elapsed_forecasts(self):
+        _, u = self.future_only_forecast()
+        u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now - 10
+        u.stop_time_update[1].schedule_relationship = pb.TripUpdate.StopTimeUpdate.NO_DATA
+        self.feeds['vehicles']['retained'] = ['rt-2610']
+        board = self.board('RO TELLINI')
+        self.assertTrue(board['stops'][1]['vehiclesBefore'][0]['retained'])
+        self.assertFalse(board['stops'][3]['vehiclesBefore'])
+
+    def test_newer_trip_assignment_does_not_leave_a_ghost_on_the_previous_direction(self):
+        v, _ = self.rome_forecast()
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
+        f = self.feed('updates'); e = f.entity.add(); e.id = 'new-assignment'
+        u = e.trip_update; u.vehicle.CopyFrom(v.vehicle); u.trip.CopyFrom(v.trip)
+        u.trip.trip_id = 'return-trip'; u.trip.direction_id = 1
+        u.timestamp = self.now
+        board = self.board('EUR FERMI (MB)')
+        self.assertTrue(all(not s['vehiclesAt'] and not s['vehiclesBefore'] for s in board['stops']))
+
+    def test_future_trip_assignment_does_not_hide_a_concurrent_current_trip_update(self):
+        v, _ = self.rome_forecast()
+        e = self.feeds['updates']['feed'].entity.add(); e.id = 'future-assignment'
+        u = e.trip_update; u.vehicle.CopyFrom(v.vehicle); u.trip.CopyFrom(v.trip)
+        u.trip.trip_id = 'return-trip'; u.timestamp = self.now
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])
+
+    def test_an_older_or_other_bus_assignment_cannot_remove_a_fresh_position(self):
+        v, _ = self.rome_forecast()
+        f = self.feed('updates'); e = f.entity.add(); e.id = 'old-assignment'
+        u = e.trip_update; u.vehicle.CopyFrom(v.vehicle); u.trip.CopyFrom(v.trip)
+        u.trip.trip_id = 'return-trip'; u.timestamp = v.timestamp - 1
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+        u.timestamp = self.now; u.vehicle.id = 'other-bus'; u.vehicle.label = '2618'
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+
+    def test_assignment_uses_position_feed_time_when_vehicle_timestamp_is_absent(self):
+        v, _ = self.rome_forecast()
+        v.ClearField('timestamp')
+        f = self.feed('updates'); e = f.entity.add(); e.id = 'assignment'
+        u = e.trip_update; u.vehicle.CopyFrom(v.vehicle); u.trip.CopyFrom(v.trip)
+        u.trip.trip_id = 'return-trip'; u.timestamp = self.now - 1
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+        # Conflicting assignments with the same timestamp are ambiguous too.
+        u.timestamp = self.now
+        self.assertTrue(self.board('EUR FERMI (MB)')['stops'][1]['vehiclesBefore'])
+        u.timestamp = self.now + 1; self.now += 1
+        board = self.board('EUR FERMI (MB)')
+        self.assertTrue(all(not s['vehiclesAt'] and not s['vehiclesBefore'] for s in board['stops']))
+
     def test_old_or_unordered_prefix_anchor_cannot_skip_to_future_stop(self):
         _, u = self.future_only_forecast()
         u.stop_time_update[0].arrival.time = self.now - 181
