@@ -1,6 +1,7 @@
 """Bounded process-local caches that share an in-flight calculation per key."""
 from collections import OrderedDict
 from concurrent.futures import Future
+import asyncio
 import threading
 import time
 
@@ -19,7 +20,7 @@ class SharedCache:
         self.total_weight = 0
         self.lock = threading.Lock()
 
-    def get(self, key, build, ttl, wait=True):
+    def claim(self, key):
         with self.lock:
             now = time.monotonic()
             for expired, (_, deadline, weight) in list(self.entries.items()):
@@ -28,15 +29,14 @@ class SharedCache:
                     self.total_weight -= weight
             if key in self.entries:
                 self.entries.move_to_end(key)
-                return self.entries[key][0]
+                return self.entries[key][0], None, False
             pending = self.pending.get(key)
             owner = pending is None
             if owner:
                 pending = self.pending[key] = Future()
-        if not owner:
-            if not wait:
-                raise CacheBusy('Calcolo già in corso')
-            return pending.result()
+        return None, pending, owner
+
+    def compute(self, key, pending, build, ttl):
         try:
             value = build()
             weight = self.weight(value)
@@ -55,3 +55,41 @@ class SharedCache:
                 self.pending.pop(key, None)
             pending.set_exception(exc)
             raise
+
+    def get(self, key, build, ttl, wait=True):
+        value, pending, owner = self.claim(key)
+        if pending is None:
+            return value
+        if not owner:
+            if not wait:
+                raise CacheBusy('Calcolo già in corso')
+            return pending.result()
+        return self.compute(key, pending, build, ttl)
+
+    async def get_async(self, key, build, ttl, executor, wait=True):
+        value, pending, owner = self.claim(key)
+        if pending is None:
+            return value
+        if not owner and not wait:
+            raise CacheBusy('Calcolo già in corso')
+        if owner:
+            try:
+                job = executor.submit(self.compute, key, pending, build, ttl)
+
+                def cancelled(future):
+                    if future.cancelled():
+                        with self.lock:
+                            if self.pending.get(key) is pending:
+                                del self.pending[key]
+                        pending.cancel()
+
+                job.add_done_callback(cancelled)
+            except Exception as exc:
+                with self.lock:
+                    self.pending.pop(key, None)
+                pending.set_exception(exc)
+        wrapped = asyncio.wrap_future(pending)
+        # A disconnected client must not cancel the calculation shared by
+        # other readers. Also retrieve a later exception if all clients leave.
+        wrapped.add_done_callback(lambda future: future.exception() if not future.cancelled() else None)
+        return await asyncio.shield(wrapped)
