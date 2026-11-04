@@ -71,3 +71,51 @@ con `load_target_met=false` anche in assenza di errori HTTP. Per interpretare
 una prova ad alto carico occorre quindi considerare il traffico effettivamente
 inviato, il ritardo dello scheduler e la coda del client. Confrontare i nuovi
 tempi anche tenendo conto del riuso delle connessioni, assente nel vecchio client.
+
+## Backend HTTP asincrono — 4 novembre 2026
+
+Il campionamento della VM fornito durante la diagnosi mostra il processo Python
+vicino al 100% di una vCPU per lunghi tratti, con circa 3,1 GiB di memoria ancora
+disponibile e poca attesa disco. Le risposte API già in cache richiedono poco
+lavoro applicativo: una misura interna ha eseguito 10.000 chiamate in circa
+0,19 secondi, esclusa la gestione HTTP.
+
+Il nuovo avvio serve le risposte pronte direttamente con aiohttp. Solo un
+calcolo mancante o un file viene affidato al pool, limitato da `WEB_THREADS`.
+Le richieste sullo stesso risultato attendono un unico calcolo senza occupare
+altri thread. La cancellazione di un lettore non cancella quel calcolo per
+gli altri; alla chiusura vengono rimossi anche i lavori accodati cancellati.
+Un processo conserva feed e storico comuni, e le regole di scadenza della cache
+e delle posizioni restano invariate.
+
+Il confronto seguente usa HTTP locale, cinque linee e dieci endpoint, database
+GTFS reale e gli stessi snapshot completi riprodotti con timestamp avanzati e
+200 ms di ritardo simulato per download. Il catalogo viene preparato prima della
+misura. L’ambiente cloud ha affinità CPU libera e non equivale alla VM da due
+vCPU; non sono compresi Internet, TLS, Caddy o rendering dei browser.
+
+| Percorso HTTP | Finestra | Richieste | Errori | Avviate nella finestra | p95 complessivo |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Waitress, misura iniziale | 20 s | 19.998 | 4 | 16.906 | 4,38 s |
+| aiohttp, confronto breve | 20 s | 20.000 | 0 | 20.000 | 0,37 s |
+| aiohttp, minuto completo | 60 s | 60.000 | 0 | 60.000 | 0,90 s |
+
+Il minuto completo ha raggiunto il carico previsto di 1.000 richieste al secondo,
+senza timeout nella coda del client. Il p95 della fase HTTP è stato 256 ms;
+il p95 complessivo include anche l’attesa del generatore. Il massimo RSS del
+server osservato dopo le prove è circa 96 MiB. I risultati sono in
+[http-runtime-load-test.json](http-runtime-load-test.json).
+
+Questo conferma il profilo riprodotto localmente e non garantisce qualsiasi
+distribuzione di 10.000 visitatori reali: viste diverse, ricerche, calcoli di
+percorso e rete modificano il carico. Dopo il merge e `sudo aggiorna-romabus`,
+ripetere dal PC la stessa prova pubblica con 256 connessioni e confrontare
+richieste inviate, errori, tempi e CPU. La porta e la configurazione Caddy non
+richiedono modifiche per usare il nuovo avvio.
+
+Sono stati superati 159 test backend e 23 test client, oltre a lint e verifica
+TypeScript. I test includono risposta da cache con tutti i worker occupati,
+richieste concorrenti sullo stesso calcolo, cancellazione di un lettore,
+invalidazione del database importato, gzip, HEAD, ETag e identificativi codificati.
+È stato verificato anche l’avvio reale `python -m server.web`: HTML e API hanno
+risposto HTTP 200, con entrambi i feed disponibili nel controllo puntuale.

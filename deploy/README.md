@@ -72,11 +72,14 @@ Per disattivare il solo aggiornamento giornaliero:
 sudo systemctl disable --now romabus-data-import.timer
 ```
 
-## Configurazione per 100 visitatori contemporanei
+## Server della VM e prove di carico
 
 La configurazione di base è pensata per una VM con **2 vCPU e 4 GB di RAM**:
-un processo Waitress, otto thread di elaborazione, fino a 256 connessioni aperte,
-feed aggiornati in background ogni 10 secondi e cache condivise nel processo.
+un processo aiohttp serve le risposte già in cache direttamente con I/O asincrono;
+un pool di otto thread esegue i calcoli mancanti e le letture dei file. I client
+che attendono lo stesso risultato condividono il lavoro senza occupare altri
+thread. Feed e storico delle vetture rimangono unici nel processo, con i feed
+aggiornati in background ogni 10 secondi.
 Non avviare più processi indipendenti per aumentare il numero di worker:
 duplicherebbero i download, le cache e lo storico delle vetture.
 
@@ -87,10 +90,18 @@ sudo aggiorna-romabus
 sudo systemctl status romabus --no-pager
 ```
 
-Lo script installa anche Waitress da `server/requirements.txt`. L’avvio resta
+Lo script installa le dipendenze da `server/requirements.txt`. L’avvio resta
 `npm run serve:web` (oppure `.venv/bin/python -m server.web`), sulla porta già
 configurata. HTTPS e il reverse proxy della VM continuano a inoltrare alla stessa
 porta. Non occorrono Redis, un nuovo database o modifiche ai timer.
+
+`WEB_THREADS` controlla il pool dei calcoli, non il numero di utenti o di
+connessioni HTTP. La cache live continua a essere rivalutata ogni secondo e
+invalidata dai nuovi feed. Se un client si disconnette, l’attesa viene cancellata
+senza interrompere un calcolo condiviso con altri lettori. L’arresto del servizio
+ferma i lettori dei feed e chiude il pool. Per ripristinare il vecchio percorso
+WSGI, impostare temporaneamente `WEB_SERVER=waitress` nell’ambiente del servizio
+e riavviarlo; il valore predefinito è `aiohttp`.
 
 Le cache del catalogo contengono al massimo 200.000 righe fermata/corsa; quelle
 delle sequenze richieste dagli arrivi altre 100.000 righe. La cache delle risposte

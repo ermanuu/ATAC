@@ -4,7 +4,7 @@ import mimetypes
 import os
 import re
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, unquote_to_bytes, urlsplit
 
 from .app import Handler as APIHandler
 from .app import application as api_application
@@ -17,7 +17,7 @@ _assets = SharedCache(max_entries=128, max_weight=16 * 1024 * 1024,
 
 
 def application(environ, start_response):
-    path = environ.get('PATH_INFO', '/')
+    path = environ.get('PATH_INFO', '/').encode('latin1').decode('utf-8', errors='replace')
     if path == '/api' or path.startswith('/api/'):
         return api_application(environ, start_response)
     if environ.get('REQUEST_METHOD') not in ('GET', 'HEAD'):
@@ -76,7 +76,7 @@ class Handler(APIHandler):
                 self.send_header(key, value)
             self.end_headers()
 
-        environ = {'REQUEST_METHOD': 'HEAD' if head else 'GET', 'PATH_INFO': unquote(urlsplit(self.path).path),
+        environ = {'REQUEST_METHOD': 'HEAD' if head else 'GET', 'PATH_INFO': unquote_to_bytes(urlsplit(self.path).path).decode('latin1'),
                    'HTTP_ACCEPT_ENCODING': self.headers.get('Accept-Encoding', ''),
                    'HTTP_IF_NONE_MATCH': self.headers.get('If-None-Match', '')}
         for body in application(environ, start_response):
@@ -89,4 +89,4 @@ if __name__ == '__main__':
     host = os.getenv('WEB_HOST', '127.0.0.1')
     port = int(os.getenv('WEB_PORT', '8000'))
     print(f'Roma Autobus web: http://{host}:{port}', flush=True)
-    serve(application, host, port)
+    serve(application, host, port, asynchronous=True)

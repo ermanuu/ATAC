@@ -1,5 +1,6 @@
 """Read-only API with short, shared response caching."""
 from dataclasses import dataclass
+import asyncio
 import gzip
 import json
 import logging
@@ -41,7 +42,7 @@ def calculate_plan(origin, destination):
         _planning.release()
 
 
-def api_response(path):
+def prepare_api(path):
     url = urlparse(path)
     params = parse_qs(url.query)
     query = lambda name: params.get(name, [''])[0]
@@ -50,46 +51,70 @@ def api_response(path):
     parts = [unquote(p) for p in url.path.strip('/').split('/')]
     live = True
     ttl = 1
-    try:
-        if parts == ['api', 'status']:
-            key = ('status',)
-            build = lambda: transit.status(**options)
-        elif parts == ['api', 'routes']:
-            key, live, ttl = ('routes', query('q')), False, 60
-            build = lambda: transit.routes(query('q'))
-        elif len(parts) == 3 and parts[:2] == ['api', 'routes']:
-            key = ('route', parts[2], query('variant'))
-            build = lambda: transit.route_detail(parts[2], query('variant') or None, **options)
-        elif parts == ['api', 'stops']:
-            key, live, ttl = ('stops', query('q')), False, 60
-            build = lambda: transit.stops(query('q')) if len(query('q')) >= 2 else []
-        elif len(parts) == 4 and parts[:2] == ['api', 'stops'] and parts[3] == 'arrivals':
-            key = ('arrivals', parts[2])
-            build = lambda: transit.arrivals(parts[2], **options)
-        elif len(parts) == 4 and parts[:2] == ['api', 'vehicles'] and parts[3] == 'diagnostics':
-            from .diagnostics import vehicle_diagnostics
-            # Diagnostics always describes the current source, not a cached API row.
-            return response(200, vehicle_diagnostics(parts[2], **options))
-        elif parts == ['api', 'plan']:
-            key, live, ttl = ('plan', query('from'), query('to')), False, 5
-            build = lambda: calculate_plan(query('from'), query('to'))
-        else:
-            return response(404, {'error': 'Endpoint non trovato'})
-        # Bucket live responses by the second, so ETA crossings and position
-        # expiry are re-evaluated even if no new source packet has arrived.
-        clock = int(time.time()) if ttl == 1 else int(time.time() // ttl)
-        source = (transit.realtime, transit.realtime.revision, refresh) if live else None
-        cache_key = (transit.database_version(), key, source, clock)
-        return _responses.get(cache_key, lambda: response(200, build()), ttl=ttl, wait=key[0] != 'plan')
-    except CacheBusy:
+    if parts == ['api', 'status']:
+        key = ('status',)
+        build = lambda: transit.status(**options)
+    elif parts == ['api', 'routes']:
+        key, live, ttl = ('routes', query('q')), False, 60
+        build = lambda: transit.routes(query('q'))
+    elif len(parts) == 3 and parts[:2] == ['api', 'routes']:
+        key = ('route', parts[2], query('variant'))
+        build = lambda: transit.route_detail(parts[2], query('variant') or None, **options)
+    elif parts == ['api', 'stops']:
+        key, live, ttl = ('stops', query('q')), False, 60
+        build = lambda: transit.stops(query('q')) if len(query('q')) >= 2 else []
+    elif len(parts) == 4 and parts[:2] == ['api', 'stops'] and parts[3] == 'arrivals':
+        key = ('arrivals', parts[2])
+        build = lambda: transit.arrivals(parts[2], **options)
+    elif len(parts) == 4 and parts[:2] == ['api', 'vehicles'] and parts[3] == 'diagnostics':
+        from .diagnostics import vehicle_diagnostics
+        return None, lambda: response(200, vehicle_diagnostics(parts[2], **options)), 0, True
+    elif parts == ['api', 'plan']:
+        key, live, ttl = ('plan', query('from'), query('to')), False, 5
+        build = lambda: calculate_plan(query('from'), query('to'))
+    else:
+        return response(404, {'error': 'Endpoint non trovato'})
+    # Bucket live responses by the second, so ETA crossings and position
+    # expiry are re-evaluated even if no new source packet has arrived.
+    clock = int(time.time()) if ttl == 1 else int(time.time() // ttl)
+    source = (transit.realtime, transit.realtime.revision, refresh) if live else None
+    cache_key = (transit.database_version(), key, source, clock)
+    return cache_key, lambda: response(200, build()), ttl, key[0] != 'plan'
+
+
+def api_error(exc):
+    if isinstance(exc, CacheBusy):
         return response(503, {'error': 'È già in corso un calcolo del percorso. Riprova tra pochi secondi.'})
-    except transit.Unavailable as exc:
+    if isinstance(exc, transit.Unavailable):
         return response(503, {'error': str(exc)})
-    except ValueError as exc:
+    if isinstance(exc, ValueError):
         return response(400, {'error': str(exc)})
-    except Exception:
-        logging.exception('API failure')
-        return response(500, {'error': 'Errore del servizio. Riprova tra poco.'})
+    logging.exception('API failure')
+    return response(500, {'error': 'Errore del servizio. Riprova tra poco.'})
+
+
+def api_response(path):
+    try:
+        prepared = prepare_api(path)
+        if isinstance(prepared, Response):
+            return prepared
+        key, build, ttl, wait = prepared
+        return build() if key is None else _responses.get(key, build, ttl=ttl, wait=wait)
+    except Exception as exc:
+        return api_error(exc)
+
+
+async def api_response_async(path, executor):
+    try:
+        prepared = prepare_api(path)
+        if isinstance(prepared, Response):
+            return prepared
+        key, build, ttl, wait = prepared
+        if key is None:
+            return await asyncio.get_running_loop().run_in_executor(executor, build)
+        return await _responses.get_async(key, build, ttl=ttl, wait=wait, executor=executor)
+    except Exception as exc:
+        return api_error(exc)
 
 
 def application(environ, start_response):
@@ -123,4 +148,4 @@ if __name__ == "__main__":
     host = os.getenv("API_HOST", "127.0.0.1")
     port = int(os.getenv("API_PORT", "8000"))
     print(f"Roma bus API on {host}:{port}", flush=True)
-    serve(application, host, port)
+    serve(application, host, port, asynchronous=True)
