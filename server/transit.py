@@ -31,6 +31,9 @@ ROME = ZoneInfo("Europe/Rome")
 _database_reads = threading.RLock()
 _stop_metadata = SharedCache(max_entries=2, max_weight=20000, weight=len)
 _trip_stops = SharedCache(max_entries=4096, max_weight=100000, weight=len)
+# Count both candidates and their trip patterns to bound retained static rows.
+_stop_schedules = SharedCache(max_entries=256, max_weight=200000,
+                              weight=lambda value: len(value[0]) + sum(map(len, value[1].values())))
 
 
 class Unavailable(Exception):
@@ -325,23 +328,39 @@ def route_detail(route_id, variant=None, now=None, refresh=False):
     return line_detail(route_id, variant, now, refresh=refresh)
 
 
-def arrivals(stop_id, refresh=False):
-    from .lines import stop_distance, variant_id
-    from .realtime_utils import stop_predictions
-    now = int(time.time())
-    scheduled = []
-    variants = {}
-    patterns = {}
-    with connect() as db:
-        for epoch, active in service_windows(db, now, 7200):
+def stop_schedule(db, stop_id, now):
+    """Static candidates covering every second of one minute, never live state."""
+    from .lines import variant_id
+    minute = now // 60 * 60
+
+    def build():
+        scheduled, variants, patterns = [], {}, {}
+        # The upper padding admits candidates entering the two-hour window
+        # later in this minute. arrivals() reapplies the exact bounds each call.
+        for epoch, active in service_windows(db, minute, 7200 + 59):
             service_date = datetime.fromtimestamp(epoch+43200, ROME).strftime('%Y%m%d')
-            for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, now-1800-epoch, now+7200-epoch)):
+            for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, minute-1800-epoch, minute+7200+59-epoch)):
                 if r["service_id"] in active:
                     if r["trip_id"] not in variants:
                         patterns[r['trip_id']] = trip_stops(db, r['trip_id'])
                         stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
                     scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": service_date})
+        return scheduled, patterns
+
+    # Use the generation of the opened connection, including during replacement.
+    return _stop_schedules.get((db.generation, stop_id, minute), build, ttl=120)
+
+
+def arrivals(stop_id, refresh=False):
+    from .lines import stop_distance
+    from .realtime_utils import stop_predictions
+    now = int(time.time())
+    with connect() as db:
+        candidates, patterns = stop_schedule(db, stop_id, now)
+    # Live enrichment mutates dictionaries: each request owns its copies.
+    scheduled = [dict(item) for item in candidates
+                 if now-1800 <= item['scheduledTime'] <= now+7200]
     live = read_live("updates", refresh)
     if live["available"]:
         by_trip = {}

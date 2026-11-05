@@ -119,3 +119,50 @@ richieste concorrenti sullo stesso calcolo, cancellazione di un lettore,
 invalidazione del database importato, gzip, HEAD, ETag e identificativi codificati.
 È stato verificato anche l’avvio reale `python -m server.web`: HTML e API hanno
 risposto HTTP 200, con entrambi i feed disponibili nel controllo puntuale.
+
+## Cache degli orari alle fermate — ricostruzione del 5 novembre 2026
+
+La correzione precedente indicata come `7d42dc6` non è presente nel checkout
+pubblicato e il relativo ZIP non è recuperabile. Questa è una nuova modifica
+basata su `61105ac`; non recupera quel commit né ne conferma le misure.
+
+Gli arrivi riutilizzano i candidati statici per fermata, versione del database
+e minuto. La query include fino a 59 secondi aggiuntivi in avanti; ogni richiesta
+riapplica esattamente la finestra originale prima di elaborare il realtime.
+Le righe vengono copiate prima dell'arricchimento live: nuove previsioni,
+cancellazioni, scadenze e numeri vettura non contaminano gli orari conservati.
+La cache HTTP continua a rivalutare gli arrivi ogni secondo e dopo nuovi feed.
+La sostituzione atomica del GTFS invalida i candidati; la cache è limitata a
+256 voci e un peso di 200.000 righe, contando anche le sequenze delle corse.
+Il peso è un limite sul numero di righe, non una misura in byte.
+
+Confronto CPU riproducibile, dalla radice del checkout:
+
+```sh
+.venv/bin/python scripts/benchmark-stop-schedule.py
+```
+
+Il benchmark usa GTFS **sintetico isolato**, 200 corse alla stessa fermata e 200
+aggiornamenti live, senza download. Confronta la funzione originale di `61105ac`
+con quella nuova per 60 secondi logici, verifica l'uguaglianza delle 60 risposte
+e misura cinque coppie di prove in ordine alternato. Le sequenze statiche delle
+corse sono già calde per entrambi; la cache degli arrivi parte vuota in ogni prova.
+
+| CPU per 60 chiamate, mediana di cinque prove | Risultato |
+| --- | ---: |
+| Versione `61105ac` | 0,530 s |
+| Nuova cache | 0,138 s |
+| Riduzione nel solo scenario sintetico | 73,95% |
+
+Dati delle prove in [stop-schedule-benchmark.json](stop-schedule-benchmark.json).
+Non sono misure HTTP o della VM, né confermano il precedente miglioramento del
+52%. Non è stata ripetuta la prova da 60.000 richieste o dimostrata la capacità
+con 10.000 utenti. Dopo l'eventuale pubblicazione del codice e aggiornamento
+della VM occorre ripetere il test pubblico a 512 connessioni, confrontando
+`load_target_met`, richieste avviate nella finestra, errori, latenza e CPU.
+
+Verifiche della nuova modifica: 165 test backend e 23 client superati, lint e
+TypeScript superati. Sei nuovi test coprono riuso fra secondi, separazione di
+fermate/minuti, aggiornamento/scadenza/cancellazione live e isolamento delle
+mutazioni, estremi temporali esatti, invalidazione dopo importazione e calendario
+dopo mezzanotte. Nessuna pubblicazione GitHub o modifica alla VM eseguita.
