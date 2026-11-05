@@ -1,0 +1,21 @@
+{
+  "baseline_cpu_seconds": [
+    0.504196,
+    0.544447,
+    0.522958,
+    0.530324,
+    0.536901
+  ],
+  "cached_cpu_seconds": [
+    0.132969,
+    0.138148,
+    0.150375,
+    0.139459,
+    0.132247
+  ],
+  "baseline_commit": "61105ac",
+  "workload": "Synthetic GTFS: 200 trips at one stop, 200 fresh live updates; 60 calls at successive seconds, five alternating trials; trip patterns prewarmed; static minute cache cold each trial.",
+  "equivalent_responses": 60,
+  "cpu_reduction_percent": 73.95,
+  "limitations": "In-process CPU only. No HTTP, public feeds, VM, Caddy, TLS or 10000-user capacity validation."
+}
