@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useData } from '../../App';
 import appConfig from '../../app.json';
@@ -17,13 +17,8 @@ const timestampLabel = (timestamp: number | null | undefined) => typeof timestam
 export function Settings() {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const state = useData<RealtimeStatus>('status', 10000, true);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
-    return () => clearInterval(timer);
-  }, []);
-  const currentTime = Math.max(now, state.receivedAt);
+  const state = useData<RealtimeStatus>('status', 0, true);
+  const currentTime = state.receivedAt;
   const status = realtimeState(state.data, currentTime, Boolean(state.error));
   const checking = !state.data && !state.error;
   const version = Constants.expoConfig?.version || appConfig.expo.version;
@@ -51,7 +46,7 @@ export function Settings() {
         <View style={[s.dot, { backgroundColor: checking ? colors.muted : status === 'available' ? colors.live : status === 'unknown' ? colors.muted : colors.accent }]} />
         <Text style={[s.status, { color: checking ? colors.muted : status === 'available' ? colors.live : status === 'unknown' ? colors.muted : colors.accent }]}>{checking ? 'Verifica in corso…' : statusLabels[status]}</Text>
       </View>
-      {state.error ? <Text accessibilityRole="alert" style={s.muted}>Impossibile verificare la fonte dati. Controlla la connessione e riprova.</Text> : <Text style={s.small}>Disponibilità e freschezza dei due feed utilizzati dall’app. Controllo automatico ogni 10 secondi.</Text>}
+      {state.error ? <Text accessibilityRole="alert" style={s.muted}>Impossibile verificare la fonte dati. Controlla la connessione e riprova.</Text> : <Text style={s.small}>Stato dei feed all’ultima verifica. Usa Verifica ora per aggiornarlo.</Text>}
       {(['vehicles', 'updates'] as const).map(kind => {
         const feed = state.data?.[kind];
         const value = state.error ? 'unknown' : feedState(feed, currentTime);

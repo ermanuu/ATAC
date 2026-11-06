@@ -19,7 +19,6 @@ export type Stop = { stop_id: string; name: string };
 export type Route = { route_id: string; name: string; description: string };
 type Health = { vehicles: { available: boolean }; updates: { available: boolean } };
 type Arrivals = { apiVersion?: number; arrivals: Arrival[]; liveAvailable: boolean; timestamp: number | null };
-type Journey = { message: string; legs: { line: string; fromName: string; toName: string; departure: number; arrival: number; stops: number }[] };
 export async function api<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
   if (!API && Platform.OS !== 'web') throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
   const response = await fetch(`${API}/api/${path}${force ? `${path.includes('?') ? '&' : '?'}fresh=1` : ''}`, { signal });
@@ -132,7 +131,7 @@ function AppShell() {
       </GlassPressable>
 
     </View>}
-    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll]}>
+    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={stopDetail ? undefined : <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll]}>
       <Slot />
     </ScrollView></View>
     {(board || stopDetail) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { bottom: 96 + Math.max(insets.bottom, 12) }]}>
@@ -142,7 +141,7 @@ function AppShell() {
     </View>}
     {!home && <View pointerEvents="box-none" style={[s.bottomDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <GlassSurface floating style={s.bottomBar} accessibilityRole="tablist">
-        {([['lines', 'Linee', '/lines'], ['stops', 'Fermate', '/stops'], ['plan', 'Percorso', '/plan'], ['settings', 'Impostazioni', '/settings']] as const).map(([key, label, path]) => <Pressable key={key} accessibilityRole="tab" accessibilityLabel={label} aria-selected={key === tab} accessibilityState={{ selected: key === tab }} onPress={() => router.replace(path)} style={({ pressed }) => [s.bottomTab, key === tab && s.bottomTabActive, pressed && s.bottomTabPressed]}>
+        {([['lines', 'Linee', '/lines'], ['stops', 'Fermate', '/stops'], ['plan', 'Percorso', '/plan'], ['settings', 'Impostazioni', '/settings']] as const).map(([key, label, path]) => <Pressable key={key} accessibilityRole="tab" accessibilityLabel={key === 'plan' ? 'Percorso, funzionalità in arrivo' : label} aria-selected={key === tab} aria-disabled={key === 'plan'} accessibilityState={{ selected: key === tab, disabled: key === 'plan' }} disabled={key === 'plan'} onPress={() => router.replace(path)} style={({ pressed }) => [s.bottomTab, key === tab && s.bottomTabActive, key === 'plan' && s.bottomTabUnavailable, pressed && s.bottomTabPressed]}>
           <NavIcon kind={key} active={key === tab} /><Text style={[s.bottomTabText, key === tab && s.bottomTabSelected]}>{label}</Text>
         </Pressable>)}
       </GlassSurface>
@@ -156,9 +155,10 @@ function AppShell() {
 }
 export function Home() {
   const { s, colors } = useStyles();
+  const insets = useSafeAreaInsets();
   const state = useData<Health>('status', 10000);
   const live = state.data?.vehicles.available && state.data?.updates.available;
-  return <View style={s.home}>
+  return <View style={[s.home, { paddingBottom: Math.max(insets.bottom, 16) }]}>
     <View style={s.homeHeader}>
       <Image source={ROMABUS_LOGO} resizeMode="contain" accessibilityLabel="Logo ROMABUS" style={[s.homeLogo, { tintColor: colors.accent }]} />
       <Text style={s.eyebrow}>ROMABUS</Text>
@@ -167,13 +167,22 @@ export function Home() {
       <Text style={s.homeSubtitle}>Linee, fermate e percorsi a Roma</Text>
     </View>
     <View style={s.homeActions}>
-      {([['lines', 'Cerca linea'], ['stops', 'Cerca fermata'], ['plan', 'Calcola percorso']] as const).map(([kind, label]) => <GlassPressable floating key={kind} accessibilityRole="button" style={s.homeAction} onPress={() => router.push(kind === 'lines' ? '/lines' : kind === 'stops' ? '/stops' : '/plan')}>
-        <View style={s.homeActionIcon}><NavIcon kind={kind} active /></View><Text style={s.homeActionText}>{label}</Text><Text style={s.arrow}>›</Text>
-      </GlassPressable>)}
+      {([['lines', 'Cerca linea'], ['stops', 'Cerca fermata'], ['plan', 'Calcola percorso']] as const).map(([kind, label]) => {
+        const content = <>
+          <View style={s.homeActionIcon}><NavIcon kind={kind} active={kind !== 'plan'} /></View>
+          <View style={s.homeActionLabel}><Text style={s.homeActionText}>{label}</Text>{kind === 'plan' && <Text style={s.homeActionHint}>Funzionalità in arrivo</Text>}</View>
+          {kind !== 'plan' && <Text style={s.arrow}>›</Text>}
+        </>;
+        return kind === 'plan'
+          ? <GlassSurface key={kind} accessible accessibilityRole="button" accessibilityLabel="Calcola percorso, funzionalità in arrivo" aria-disabled accessibilityState={{ disabled: true }} style={[s.homeAction, s.homeActionUnavailable]}>{content}</GlassSurface>
+          : <GlassPressable floating key={kind} accessibilityRole="button" style={s.homeAction} onPress={() => router.push(kind === 'lines' ? '/lines' : '/stops')}>{content}</GlassPressable>;
+      })}
     </View>
-    <GlassPressable accessibilityRole="button" accessibilityLabel="Apri impostazioni" onPress={() => router.push('/settings')} style={s.homeSettings}>
-      <NavIcon kind="settings" active /><Text style={s.homeSettingsText}>Impostazioni</Text><Text style={s.arrow}>›</Text>
-    </GlassPressable>
+    <View style={s.homeSettingsDock}>
+      <GlassPressable accessibilityRole="button" accessibilityLabel="Apri impostazioni" onPress={() => router.push('/settings')} style={s.homeSettings}>
+        <NavIcon kind="settings" active /><Text style={s.homeSettingsText}>Impostazioni</Text><Text style={s.arrow}>›</Text>
+      </GlassPressable>
+    </View>
   </View>;
 }
 export function Lines() {
@@ -278,7 +287,7 @@ export function Stops() {
       </GlassSurface>)}
     </View>}
     {specificStop && stop ? <GlassSurface style={s.card}><View style={s.row}><Text style={[s.heading, s.flex]}>{stop.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={favorites.some(f => f.stop_id === stop.stop_id) ? 'Rimuovi fermata dalle preferite' : 'Aggiungi fermata alle preferite'} accessibilityState={{ selected: favorites.some(f => f.stop_id === stop.stop_id), disabled: !favoritesReady }} disabled={!favoritesReady} style={s.favoriteToggle} onPress={() => { void toggleFavorite(stop); }}><Text style={s.favoriteStar}>{favorites.some(f => f.stop_id === stop.stop_id) ? '★' : '☆'}</Text></Pressable></View><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassSurface> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
-    <RequestState state={state} />
+    <RequestState state={state} showLoading={!specificStop} />
     {openingRoute && <View style={s.row}><ActivityIndicator color={colors.accent} /><Text style={s.muted}>Apertura itinerario…</Text></View>}
     {!!navigationError && <Notice text={navigationError} />}
     {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
@@ -295,32 +304,16 @@ export function Stops() {
 
 export function Planner() {
   const { s } = useStyles();
-  const { register } = useRefresh();
-  const [origin, setOrigin] = useState<Stop | null>(null);
-  const [destination, setDestination] = useState<Stop | null>(null);
-  const [journey, setJourney] = useState<Journey | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const request = useRef<AbortController | null>(null);
-  useEffect(() => () => request.current?.abort(), []);
-  const reset = () => { request.current?.abort(); setJourney(null); setError(''); setLoading(false); };
-  const calculate = useCallback(async () => {
-    if (!origin || !destination) return;
-    request.current?.abort(); const controller = new AbortController(); request.current = controller;
-    setLoading(true); setJourney(null); setError('');
-    try { setJourney(await api<Journey>(`plan?from=${encodeURIComponent(origin.stop_id)}&to=${encodeURIComponent(destination.stop_id)}`, controller.signal)); }
-    catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
-    finally { if (!controller.signal.aborted) setLoading(false); }
-  }, [origin, destination]);
-  useEffect(() => { if (journey) return register(async () => { await calculate(); }); }, [register, calculate, journey]);
-  return <View style={s.stack}><Text style={s.heading}>Dove vuoi andare?</Text><Text style={s.muted}>Percorsi fra fermate, con partenza adesso</Text>
-    <StopSearch label="Da" selected={origin} onSelect={v => { reset(); setOrigin(v); }} /><StopSearch label="A" selected={destination} onSelect={v => { reset(); setDestination(v); }} />
-    <Button text={loading ? 'Calcolo in corso…' : 'Trova percorso →'} disabled={!origin || !destination || loading} onPress={() => { void calculate(); }} />
-    <Notice text="Orari programmati: solo autobus, cambi alla stessa fermata e margine di 2 minuti. Nessun tratto a piedi; traffico e previsioni live non modificano l’itinerario." />
-    {!!error && <Notice text={error} />}
-    {journey && <><Text style={s.muted}>{journey.message}</Text>{journey.legs.map((leg,i) => <GlassSurface key={i} style={s.card}><View style={s.row}><Badge name={leg.line} /><Text style={s.heading}>{clock(leg.departure)} → {clock(leg.arrival)}</Text></View><Text style={s.body}>{leg.fromName}</Text><Text style={s.muted}>↓ {leg.stops} {leg.stops === 1 ? 'fermata' : 'fermate'}</Text><Text style={s.body}>{leg.toName}</Text>{i < journey.legs.length-1 && <Text style={s.link}>Cambia autobus qui</Text>}</GlassSurface>)}</>}
+  return <View style={s.stack}>
+    <Text accessibilityRole="header" style={s.heading}>Calcola percorso</Text>
+    <GlassSurface style={s.comingSoon}>
+      <NavIcon kind="plan" active />
+      <Text style={s.comingSoonTitle}>Funzionalità in arrivo</Text>
+      <Text style={s.muted}>Qui potrai trovare un percorso tra due fermate.</Text>
+    </GlassSurface>
   </View>;
 }
+
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background }, safeContent: { flex: 1 },
   homeLogo: { width: 140, height: 84, alignSelf: 'center' }, launchScreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', gap: 8 }, launchLogo: { width: 180, height: 180 }, launchName: { color: colors.accent, fontWeight: '800', fontSize: 22, letterSpacing: 3, marginBottom: 24 },
@@ -330,9 +323,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   homeContent: { paddingHorizontal: 24 }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 24, width: '100%', maxWidth: 420, alignSelf: 'center', paddingTop: 12, paddingBottom: 36 }, homeHeader: { gap: 10, alignItems: 'center' }, homeActions: { gap: 12 }, eyebrow: { fontSize: 24, fontWeight: '800', color: colors.accent, letterSpacing: 3 }, homeTitle: { fontSize: 30, fontWeight: '800', color: colors.text, marginTop: 6, letterSpacing: -1, textAlign: 'center' }, homeSubtitle: { color: colors.muted, fontSize: 15, textAlign: 'center' }, flex: { flex: 1 }, stack: { gap: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   livePill: { fontSize: 11, fontWeight: '600', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.surface, overflow: 'hidden' },
-  homeAction: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14, borderRadius: 26, minHeight: 78 }, homeActionIcon: { width: 44, height: 44, borderRadius: 16, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' }, homeActionText: { flex: 1, color: colors.text, fontSize: 17, fontWeight: '700' },
+  homeAction: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14, borderRadius: 26, minHeight: 78 }, homeActionIcon: { width: 44, height: 44, borderRadius: 16, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' }, homeActionText: { color: colors.text, fontSize: 17, fontWeight: '700' },
   bottomDock: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 12 }, bottomBar: { flexDirection: 'row', borderRadius: 32, padding: 6, maxWidth: 460, width: '100%', alignSelf: 'center' },
-  bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: colors.accentSoft, boxShadow: 'none' }, bottomTabPressed: { backgroundColor: colors.pressed }, bottomTabText: { color: colors.muted, fontSize: 11, fontWeight: '600' }, bottomTabSelected: { color: colors.accent, fontWeight: '800' },
+  bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: colors.accentSoft, boxShadow: 'none' }, bottomTabPressed: { backgroundColor: colors.pressed }, bottomTabText: { color: colors.muted, fontSize: 11, fontWeight: '600' }, bottomTabSelected: { color: colors.accent, fontWeight: '800' }, bottomTabUnavailable: { opacity: 0.5 },
   content: { flex: 1, paddingHorizontal: 20 }, scroll: { paddingBottom: 140, gap: 14 }, heading: { color: colors.text, fontSize: 20, fontWeight: '700', flexShrink: 1 },
   boardScroll: { paddingBottom: 190 },
   lineRefreshDock: { position: 'absolute', right: 20 }, lineRefreshButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, lineRefreshIcon: { fontSize: 30, color: colors.onAccent, lineHeight: 34 },
@@ -349,6 +342,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   notice: { padding: 14, borderRadius: 20, marginVertical: 8 }, card: { borderRadius: 24, padding: 18, gap: 12 },
   link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
   label: { color: colors.text, fontSize: 13, fontWeight: '700' }, stop: { padding: 14, marginBottom: 8 },
+  homeActionLabel: { flex: 1, gap: 4 }, homeActionHint: { color: colors.muted, fontSize: 12, lineHeight: 17 }, homeActionUnavailable: { backgroundColor: colors.surfaceAlt },
+  homeSettingsDock: { marginTop: 'auto' },
+  comingSoon: { padding: 24, gap: 14, alignItems: 'flex-start' }, comingSoonTitle: { color: colors.accent, fontSize: 20, fontWeight: '700' },
   homeSettings: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: 18, paddingVertical: 12 }, homeSettingsText: { flex: 1, color: colors.text, fontSize: 15, fontWeight: '600' },
 });
 
