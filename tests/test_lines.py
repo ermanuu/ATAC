@@ -289,30 +289,31 @@ class LineTests(unittest.TestCase):
         self.assertEqual([d['tripId'] for d in result['departures']], ['morning', 't1', 'evening'])
         self.assertEqual(result['date'], '2026-10-30')
 
-    def test_day_timetable_runs_from_0400_through_0359_next_day(self):
+    def test_timetable_includes_calendar_day_and_only_first_three_hours_next_day(self):
         with sqlite3.connect(t.DB) as db:
             db.execute("INSERT INTO exceptions VALUES ('daily','20261029',2)")
-        self.add_trip('too-early', 4*3600-1)
-        self.add_trip('start', 4*3600)
+        self.add_trip('start', 0)
+        self.add_trip('end-of-day', 24*3600-1)
         self.add_trip('midnight', 24*3600)
-        self.add_trip('last', 28*3600-1)
-        self.add_trip('too-late', 28*3600)
+        self.add_trip('last', 27*3600-1)
+        self.add_trip('too-late', 27*3600)
         result = daily_departures('r1', self.variant(), self.now)
-        self.assertEqual([d['tripId'] for d in result['departures']], ['start', 't1', 'midnight', 'last'])
-        self.assertEqual(result['window']['to']-result['window']['from'], 86400)
-        self.assertEqual(datetime.fromtimestamp(result['window']['from'], t.ROME).hour, 4)
+        self.assertEqual([d['tripId'] for d in result['departures']], ['start', 't1', 'end-of-day', 'midnight', 'last'])
+        self.assertEqual(result['window']['to']-result['window']['from'], 27*3600)
+        self.assertEqual(datetime.fromtimestamp(result['window']['from'], t.ROME).hour, 0)
+        self.assertEqual(datetime.fromtimestamp(result['window']['to'], t.ROME).hour, 3)
 
     def test_daily_departures_include_previous_service_day_after_24_hours(self):
         self.now = int(datetime(2026,10,31,0,59,tzinfo=t.ROME).timestamp())
         result = daily_departures('r1', self.variant('Notturno'), self.now)
-        self.assertEqual(result['date'], '2026-10-30')
+        self.assertEqual(result['date'], '2026-10-31')
         self.assertEqual([d['tripId'] for d in result['departures']], ['night'])
         self.assertEqual(result['departures'][0]['serviceDate'], '20261030')
 
     def test_operating_day_uses_rome_wall_clock_across_dst_change(self):
         self.now = int(datetime(2026,10,24,10,0,tzinfo=t.ROME).timestamp())
         result = daily_departures('r1', self.variant(), self.now)
-        self.assertEqual(result['window']['to']-result['window']['from'], 25*3600)
+        self.assertEqual(result['window']['to']-result['window']['from'], 28*3600)
         self.assertTrue(all(result['window']['from'] <= d['time'] < result['window']['to'] for d in result['departures']))
 
     def test_timetable_ignores_live_delay_and_live_cancellation_without_fetching_feeds(self):
@@ -345,20 +346,21 @@ class LineTests(unittest.TestCase):
         self.add_trip('zero-hour', 30*60)
         self.add_trip('over24', 24*3600+45*60)
         result = daily_departures('r1', self.variant(), self.now)
-        self.assertEqual([d['tripId'] for d in result['departures']], ['t1', 'zero-hour', 'over24'])
-        self.assertEqual([d['serviceDate'] for d in result['departures']], ['20261030', '20261031', '20261030'])
+        self.assertEqual([d['tripId'] for d in result['departures']], ['zero-hour', 'over24', 't1', 'zero-hour', 'over24'])
+        self.assertEqual([d['serviceDate'] for d in result['departures']], ['20261030', '20261029', '20261030', '20261031', '20261030'])
 
-    def test_night_timetable_includes_2300_through_0600(self):
+    def test_night_timetable_keeps_calendar_date_and_only_three_extra_hours(self):
         with sqlite3.connect(t.DB) as db:
             db.execute("UPDATE routes SET name='nMB' WHERE route_id='r1'")
-        for trip, departure in [('too-early',23*3600-1),('start',23*3600),('last',30*3600),('too-late',30*3600+60)]:
+            db.execute("INSERT INTO exceptions VALUES ('daily','20261029',2)")
+        for trip, departure in [('morning',90*60),('evening',23*3600),('last',27*3600-1),('too-late',27*3600)]:
             self.add_trip(trip, departure)
         selected = self.variant()
         result = daily_departures('r1', selected, self.now)
         self.assertTrue(result['nightService'])
-        self.assertEqual([d['tripId'] for d in result['departures']], ['start', 'last'])
+        self.assertEqual([d['tripId'] for d in result['departures']], ['morning', 't1', 'evening', 'last'])
         self.now = int(datetime(2026,10,31,3,0,tzinfo=t.ROME).timestamp())
-        self.assertEqual(daily_departures('r1', selected, self.now)['date'], '2026-10-30')
+        self.assertEqual(daily_departures('r1', selected, self.now)['date'], '2026-10-31')
         self.now = int(datetime(2026,10,31,6,1,tzinfo=t.ROME).timestamp())
         self.assertEqual(daily_departures('r1', selected, self.now)['date'], '2026-10-31')
 

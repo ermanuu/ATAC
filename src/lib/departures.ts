@@ -58,3 +58,30 @@ export function departureLabel(departure: Departure, now: number) {
   if (departure.kind === 'live') return 'LIVE';
   return 'Program.';
 }
+
+export function calendarDateOffset(date: string, offset: number) {
+  const day = new Date(`${date}T12:00:00Z`);
+  day.setUTCDate(day.getUTCDate()+offset);
+  return day.toISOString().slice(0, 10);
+}
+
+export function nightDescription(date: string) {
+  const weekday = (value: string) => new Date(`${value}T12:00:00Z`).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', weekday: 'long' });
+  return `Notte tra ${weekday(date)} e ${weekday(calendarDateOffset(date, 1))}`;
+}
+
+export function scheduledTimetableSections(departures: Departure[], night = false, date?: string) {
+  const days = groupScheduledDeparturesByDay(departures);
+  const sections: (typeof days[number] & { nightDate?: string })[] = [];
+  for (const candidate of days) {
+    if (date && candidate.date !== date && candidate.date !== calendarDateOffset(date, 1)) continue;
+    const day = date && candidate.date !== date ? { ...candidate, hours: candidate.hours.filter(group => Number(group.hour) < 3) } : candidate;
+    if (!day.hours.length) continue;
+    if (!night) { sections.push(day); continue; }
+    const morning = day.hours.filter(group => Number(group.hour) < 12);
+    const evening = day.hours.filter(group => Number(group.hour) >= 12);
+    if (morning.length) sections.push({ date: day.date, hours: morning, nightDate: calendarDateOffset(day.date, -1) });
+    if (evening.length) sections.push({ date: day.date, hours: evening, nightDate: day.date });
+  }
+  return sections;
+}

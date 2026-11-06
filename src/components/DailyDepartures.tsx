@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
-import { groupScheduledDeparturesByDay, type Departure } from '../lib/departures';
+import { calendarDateOffset, nightDescription, scheduledTimetableSections, type Departure } from '../lib/departures';
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import { useTheme } from '../ui/Theme';
 import { layout, typography } from '../ui/design';
@@ -24,11 +24,11 @@ export function DailyDepartures() {
   const { id, variant, date, fromDirections } = useLocalSearchParams<{ id: string; variant: string; date?: string; fromDirections?: string }>();
   const state = useData<Timetable>(id && variant ? `routes/${encodeURIComponent(id)}/departures?variant=${encodeURIComponent(variant)}${date ? `&date=${encodeURIComponent(date)}` : ''}` : null, 0, true);
   const data = state.data;
+  const night = data?.nightService ?? Boolean(data?.route.name.toLowerCase().startsWith('n'));
+  const sections = data ? scheduledTimetableSections(data.departures, night, data.date) : [];
   const changeDate = (offset: number) => {
     if (!data) return;
-    const next = new Date(`${data.date}T12:00:00Z`);
-    next.setUTCDate(next.getUTCDate()+offset);
-    router.replace({ pathname: '/line/[id]/departures', params: { id, variant, date: next.toISOString().slice(0, 10), ...(fromDirections ? { fromDirections } : {}) } });
+    router.replace({ pathname: '/line/[id]/departures', params: { id, variant, date: calendarDateOffset(data.date, offset), ...(fromDirections ? { fromDirections } : {}) } });
   };
   return <View style={styles.page}>
     <Text accessibilityRole="header" style={[typography.title, { color: colors.text }]}>Orari programmati</Text>
@@ -47,14 +47,14 @@ export function DailyDepartures() {
         </GlassPressable>
         <View style={styles.date}>
           <Text style={[typography.label, { color: colors.text, textAlign: 'center' }]}>{dateLabel(data.date)}</Text>
-          <Text style={[typography.caption, { color: colors.muted }]}>{(data.nightService ?? data.route.name.toLowerCase().startsWith('n')) ? '23:00–06:00' : '04:00–03:59'}</Text>
         </View>
         <GlassPressable accessibilityRole="button" accessibilityLabel="Giorno successivo" disabled={state.loading} onPress={() => changeDate(1)} style={styles.dateButton}>
           <Text style={[styles.arrow, { color: colors.accent }]}>›</Text>
         </GlassPressable>
       </View>
       {!data.departures.length && <Notice text="Nessuna partenza programmata per la giornata selezionata." />}
-      {groupScheduledDeparturesByDay(data.departures).map(section => <View key={section.date} style={styles.day}>
+      {sections.map((section, sectionIndex) => <View key={`${section.date}-${section.nightDate || ''}`} style={styles.day}>
+        {section.nightDate && section.nightDate !== sections[sectionIndex-1]?.nightDate && <Text accessibilityRole="header" style={[typography.label, { color: colors.muted }]}>{nightDescription(section.nightDate)}</Text>}
         {section.date !== data.date && <View style={styles.dayHeading}>
           <Text accessibilityRole="header" style={[typography.heading, { color: colors.text }]}>Dopo mezzanotte</Text>
           <Text style={[typography.caption, { color: colors.muted }]}>{dateLabel(section.date)} · giorno successivo</Text>
@@ -62,12 +62,12 @@ export function DailyDepartures() {
         <GlassSurface style={styles.timetable}>
           <View style={[styles.hourRow, styles.tableHeader, { borderColor: colors.border }]}>
             <Text style={[typography.caption, styles.hour, { color: colors.muted }]}>Ora</Text>
-            <Text style={[typography.caption, { color: colors.muted }]}>Partenze</Text>
+            <Text style={[typography.caption, { color: colors.muted }]}>Minuti</Text>
           </View>
           {section.hours.map((group, index) => <View key={group.hour} style={[styles.hourRow, index > 0 && { borderTopWidth: 1, borderColor: colors.border }]}>
             <Text accessibilityLabel={`Ore ${group.hour}`} style={[typography.heading, styles.hour, { color: colors.text }]}>{group.hour}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator accessibilityLabel={`Partenze delle ore ${group.hour} del ${section.date}`} style={styles.hourScroller} contentContainerStyle={styles.hourTrack}>
-              {group.departures.map(d => <Text key={`${d.tripId}-${d.serviceDate}`} accessibilityLabel={`Partenza programmata ${clock(d.scheduledTime)}`} style={[styles.time, { color: colors.text }]}>{clock(d.scheduledTime)}</Text>)}
+              {group.departures.map(d => <Text key={`${d.tripId}-${d.serviceDate}`} accessibilityLabel={`Partenza programmata ${clock(d.scheduledTime)}`} style={[styles.time, { color: colors.text }]}>{clock(d.scheduledTime).slice(-2)}</Text>)}
             </ScrollView>
           </View>)}
         </GlassSurface>

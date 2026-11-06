@@ -140,7 +140,7 @@ function AppShell() {
       </GlassPressable>
 
     </View>}
-    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={stopDetail ? undefined : <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll]}>
+    <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={stopDetail ? undefined : <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll, lineDetail && !board && !departurePage && s.directionScroll]}>
       <Slot />
     </ScrollView></View>
     {(board || stopDetail || departurePage) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { right: Math.max(layout.gutter, (width-layout.maxWidth)/2+layout.gutter), bottom: 96 + Math.max(insets.bottom, 12) }]}>
@@ -230,7 +230,7 @@ export function Lines() {
     {state.data?.length === 0 && <Notice text="Nessuna linea trovata." />}
     {!!recentError && <Notice text={recentError} />}
     {opening && <ActivityIndicator color={colors.accent} />}
-    {results.map(r => <GlassPressable disabled={opening} accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => openLine(r)}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>{r.description || `Linea ${r.name}`}</Text><Text style={s.small}>Scegli la direzione →</Text></View><Text style={s.arrow}>›</Text></GlassPressable>)}
+    {results.map(r => <GlassPressable disabled={opening} accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => openLine(r)}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>Linea {r.name}</Text><Text style={s.small}>Scegli la direzione →</Text></View><Text style={s.arrow}>›</Text></GlassPressable>)}
   </View>;
 }
 export function Stops() {
@@ -356,6 +356,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: colors.accentSoft, boxShadow: 'none' }, bottomTabPressed: { backgroundColor: colors.pressed }, bottomTabText: { ...typography.micro, color: colors.muted, fontWeight: '600' }, bottomTabSelected: { color: colors.accent, fontWeight: '800' }, bottomTabUnavailable: { opacity: 0.5 },
   content: { flex: 1, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: layout.gutter }, scroll: { paddingBottom: 140, gap: layout.gap }, pageTitle: { ...typography.title, color: colors.text }, heading: { ...typography.heading, color: colors.text, flexShrink: 1 },
   boardScroll: { paddingBottom: 190 },
+  directionScroll: { flexGrow: 1 },
   lineRefreshDock: { position: 'absolute', right: 20 }, lineRefreshButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, lineRefreshIcon: { fontSize: 30, color: colors.onAccent, lineHeight: 34 },
   muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted }, body: { ...typography.body, color: colors.text, fontWeight: '600' },
   input: { ...getSurfaceStyle(colors), ...typography.body, minHeight: 56, borderRadius: layout.radius, paddingHorizontal: layout.cardPadding, paddingVertical: 16, color: colors.text, marginVertical: 8 },

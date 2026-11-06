@@ -166,7 +166,7 @@ def order_terminal_vehicles(stops, departures, now):
 
 
 def timetable_window(route, now, date=None):
-    """Use Rome operating days, with a separate overnight window for n-lines."""
+    """A Rome calendar day, plus only 00:00–02:59 of the following day."""
     night = route['name'].strip().lower().startswith('n')
     local = datetime.fromtimestamp(now, t.ROME)
     if date:
@@ -178,11 +178,8 @@ def timetable_window(route, now, date=None):
             raise ValueError('Data non valida: usa il formato AAAA-MM-GG.') from None
     else:
         day = local.date()
-        if local.hour < (6 if night else 4) or (night and local.hour == 6 and local.minute == 0):
-            day -= timedelta(days=1)
-    start = int(datetime.combine(day, datetime.min.time().replace(hour=23 if night else 4), t.ROME).timestamp())
-    # Include the final 06:00 departure; the daytime window ends before 04:00.
-    end_time = datetime.min.time().replace(hour=6, minute=1) if night else datetime.min.time().replace(hour=4)
+    start = int(datetime.combine(day, datetime.min.time(), t.ROME).timestamp())
+    end_time = datetime.min.time().replace(hour=3)
     end = int(datetime.combine(day + timedelta(days=1), end_time, t.ROME).timestamp())
     return day, start, end, night
 
@@ -387,11 +384,13 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
             for epoch, active in windows for trip_id, trip in g['trips'].items())]
         result = {'route': dict(route), 'variants': [summary(g) for g in active_groups]}
         if not variant:
+            from .variant_types import inactive_variants
             catalogue, _ = catalogue_patterns(db, route_id)
             choices = {}
             for group in catalogue:
                 choices.setdefault(timetable_key(group), summary(group))
             result['timetableVariants'] = list(choices.values())
+            result['inactiveVariants'] = inactive_variants(route_id, catalogue, {g['id'] for g in active_groups})
     if not variant:
         # The direction picker needs no realtime requests, vehicle list or stop list.
         return result

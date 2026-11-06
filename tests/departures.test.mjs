@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { departureLabel, departureState, groupDeparturesByHour, groupScheduledDeparturesByDay, visibleDepartures } from '../src/lib/departures.ts';
+import { calendarDateOffset, departureLabel, departureState, groupDeparturesByHour, groupScheduledDeparturesByDay, nightDescription, scheduledTimetableSections, visibleDepartures } from '../src/lib/departures.ts';
 
 const now = 10000;
 const departure = { tripId: 'trip', serviceDate: '20261106', time: now, scheduledTime: now, kind: 'scheduled' };
@@ -62,6 +62,33 @@ test('overlapping GTFS service dates do not repeat the same scheduled minute', (
     {...departure, tripId:'early-saturday', serviceDate:'20261107', scheduledTime:time},
   ]);
   assert.equal(groups[0].hours[0].departures.length, 1);
+});
+
+test('night captions use the two correct weekdays, including accented names', () => {
+  assert.equal(nightDescription('2026-11-07'), 'Notte tra sabato e domenica');
+  assert.equal(nightDescription('2026-11-04'), 'Notte tra mercoledì e giovedì');
+  assert.equal(calendarDateOffset('2026-12-31', 1), '2027-01-01');
+});
+
+test('a calendar-day night timetable distinguishes the previous and following nights', () => {
+  const at = value => ({...departure, scheduledTime:Date.parse(value)/1000});
+  const sections = scheduledTimetableSections([
+    at('2026-11-07T01:00:00+01:00'),
+    at('2026-11-07T23:30:00+01:00'),
+    at('2026-11-08T02:15:00+01:00'),
+  ], true);
+  assert.deepEqual(sections.map(s=>s.nightDate), ['2026-11-06','2026-11-07','2026-11-07']);
+  assert.deepEqual(sections.map(s=>s.hours[0].hour), ['01','23','02']);
+});
+
+test('the visible timetable keeps the calendar day and only 00–02 of the following day', () => {
+  const at = value => ({...departure, scheduledTime:Date.parse(value)/1000});
+  const sections = scheduledTimetableSections([
+    at('2026-11-05T23:59:00+01:00'), at('2026-11-06T00:00:00+01:00'),
+    at('2026-11-06T23:59:00+01:00'), at('2026-11-07T00:00:00+01:00'),
+    at('2026-11-07T02:59:00+01:00'), at('2026-11-07T03:00:00+01:00'),
+  ], false, '2026-11-06');
+  assert.deepEqual(sections.map(s=>s.hours.map(h=>h.hour)), [['00','23'],['00','02']]);
 });
 
 test('past times and buses already beyond the origin are marked departed', () => {

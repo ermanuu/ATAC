@@ -14,19 +14,23 @@ import { DepartureTile } from './DepartureTile';
 
 const BUS_ICON = require('../../assets/bus-front.png');
 
-type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
+type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number; category?: string };
 type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; tripId?: string; serviceDate?: string; departureTime?: number; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
 type Stop = { stop_id: string; name: string; sequence: number; vehiclesAt: Vehicle[]; vehiclesBefore: Vehicle[] };
-type Directions = { route: Route; variants: Variant[]; timetableVariants?: Variant[] };
+type Directions = { route: Route; variants: Variant[]; timetableVariants?: Variant[]; inactiveVariants?: Variant[] };
 type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: Departure[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
 
 export function RouteDirections() {
   const { s } = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const state = useData<Directions>(id ? `routes/${encodeURIComponent(id)}` : null, 10000, true);
-  const inactiveVariants = state.data?.timetableVariants?.filter(v => !state.data?.variants.some(active =>
-    active.direction === v.direction && active.headsign === v.headsign && active.fromName === v.fromName && active.toName === v.toName)) || [];
-  return <View style={s.stack}>
+  const inactiveVariants = state.data?.inactiveVariants ?? state.data?.timetableVariants?.filter(v => !state.data?.variants.some(active => active.id === v.id)) ?? [];
+  const groups = new Map<string, Variant[]>();
+  for (const variant of inactiveVariants) {
+    const category = variant.category || 'Altre varianti';
+    groups.set(category, [...(groups.get(category) || []), variant]);
+  }
+  return <View style={[s.stack, s.directionPage]}>
     <RequestState state={state} />
     {state.data && <>
       <View style={s.row}><Badge name={state.data.route.name} /><Text accessibilityRole="header" style={s.title}>Scegli la direzione</Text></View>
@@ -36,13 +40,16 @@ export function RouteDirections() {
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
         <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text><Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
       </GlassPressable>)}
-      {inactiveVariants.length > 0 && <>
-        <Text style={s.heading}>Consulta gli orari</Text>
-        {inactiveVariants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}`} style={s.direction}
-          onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant: variant.id, fromDirections: '1' } })}>
-          <View style={s.flex}><Text style={s.directionName}>{variant.headsign}</Text><Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.link}>Orari programmati</Text></View><Text style={s.chevron}>›</Text>
-        </GlassPressable>)}
-      </>}
+      {inactiveVariants.length > 0 && <View style={s.inactiveSection}>
+        <Text accessibilityRole="header" style={s.inactiveHeading}>Non attive</Text>
+        {[...groups].map(([category, variants]) => <View key={category} style={s.inactiveGroup}>
+          <Text accessibilityRole="header" style={s.inactiveCategory}>{category}</Text>
+          {variants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}, ${category}`} style={s.inactiveDirection}
+            onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant: variant.id, fromDirections: '1' } })}>
+            <View style={s.flex}><Text style={s.inactiveName}>{variant.headsign}</Text><Text style={s.small}>Da {variant.fromName}</Text></View><Text style={s.inactiveArrow}>›</Text>
+          </GlassPressable>)}
+        </View>)}
+      </View>}
     </>}
   </View>;
 }
@@ -132,6 +139,11 @@ export function RouteTimeline() {
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   flex: { flex: 1 }, stack: { gap: layout.gap }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  directionPage: { flexGrow: 1 },
+  inactiveSection: { marginTop: 'auto', paddingTop: 28, gap: 12 }, inactiveHeading: { ...typography.body, color: colors.muted, fontWeight: '700' },
+  inactiveGroup: { gap: 8 }, inactiveCategory: { ...typography.caption, color: colors.muted, fontWeight: '600' },
+  inactiveDirection: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, backgroundColor: colors.surfaceAlt, minHeight: 64 },
+  inactiveName: { ...typography.body, color: colors.muted, fontWeight: '600' }, inactiveArrow: { fontSize: 22, color: colors.muted },
   title: { ...typography.title, color: colors.text, flexShrink: 1 },
   heading: { ...typography.heading, color: colors.text, flexShrink: 1 }, muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted },
   kicker: { ...typography.micro, color: colors.accent, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
