@@ -99,7 +99,7 @@ function AppShell() {
   const stopDetail = pathname.startsWith('/stop/') || (pathname === '/stops' && Boolean(params.stopId));
   const board = lineDetail && Boolean(params.id && params.variant);
   const lineTitle = title && title.routeId === params.id && title.variant === params.variant ? `${title.line}-${title.direction.toLocaleUpperCase('it-IT')}` : '';
-  const lineRefreshing = refreshing || Boolean(lineTitle && title?.updating);
+  const detailRefreshing = refreshing || Boolean(board && lineTitle && title?.updating);
   const tab = stopDetail || pathname === '/stops' ? 'stops' : pathname === '/plan' ? 'plan' : 'lines';
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [pathname, params.stopId]);
   const returnToSearch = () => router.replace({ pathname: '/lines', params: { focus: '1' } });
@@ -124,9 +124,9 @@ function AppShell() {
     <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#96002d" colors={['#96002d']} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll]}>
       <Slot />
     </ScrollView></View>
-    {board && <View pointerEvents="box-none" style={[s.lineRefreshDock, { bottom: 96 + Math.max(insets.bottom, 12) }]}>
-      <GlassPressable floating accessibilityRole="button" accessibilityLabel="Aggiorna fermate della linea" accessibilityState={{ busy: lineRefreshing, disabled: lineRefreshing }} disabled={lineRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
-        {lineRefreshing ? <ActivityIndicator accessibilityLabel="Aggiornamento fermate in corso" color="#96002d" /> : <Text style={s.lineRefreshIcon}>↻</Text>}
+    {(board || stopDetail) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { bottom: 96 + Math.max(insets.bottom, 12) }]}>
+      <GlassPressable floating accessibilityRole="button" accessibilityLabel={stopDetail ? 'Aggiorna arrivi della fermata' : 'Aggiorna fermate della linea'} accessibilityState={{ busy: detailRefreshing, disabled: detailRefreshing }} disabled={detailRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
+        {detailRefreshing ? <ActivityIndicator accessibilityLabel={stopDetail ? 'Aggiornamento arrivi in corso' : 'Aggiornamento fermate in corso'} color="#96002d" /> : <Text style={s.lineRefreshIcon}>↻</Text>}
       </GlassPressable>
     </View>}
     {!home && <View pointerEvents="box-none" style={[s.bottomDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
