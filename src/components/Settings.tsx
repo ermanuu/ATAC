@@ -7,6 +7,7 @@ import { feedState, realtimeState, type FeedState, type RealtimeStatus } from '.
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import { useTheme, type ThemeColors } from '../ui/Theme';
 import { ThemePicker } from './ThemePicker';
+import { layout, typography } from '../ui/design';
 
 const feedLabels: Record<FeedState, string> = { available: 'Disponibile', unavailable: 'Non disponibile', stale: 'Dati non aggiornati', unknown: 'Da verificare' };
 const statusLabels = { available: 'Operativo', partial: 'Parzialmente disponibile', unavailable: 'Non disponibile', unknown: 'Stato non verificabile' };
@@ -69,11 +70,11 @@ export function Settings() {
 }
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
-  page: { gap: 18 }, title: { color: colors.text, fontSize: 26, fontWeight: '800' }, section: { padding: 18, gap: 12, borderRadius: 22 },
-  heading: { color: colors.text, fontSize: 18, fontWeight: '700' }, brand: { color: colors.accent, fontSize: 22, fontWeight: '800', letterSpacing: 2 },
-  body: { color: colors.text, fontSize: 14 }, value: { color: colors.text, fontSize: 14, fontWeight: '700' }, infoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  muted: { color: colors.muted, fontSize: 14, lineHeight: 21 }, small: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, dot: { width: 8, height: 8, borderRadius: 4 }, status: { flex: 1, fontSize: 16, fontWeight: '700' },
-  feed: { gap: 6, borderTopWidth: 1, borderColor: colors.border, paddingTop: 12 }, feedTitle: { color: colors.text, fontSize: 14, fontWeight: '700' }, feedStatus: { fontSize: 13, fontWeight: '600' }, endpoint: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  checkButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderRadius: 16, backgroundColor: colors.accentFill, borderColor: colors.accentFill }, checkButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 14 },
+  page: { gap: layout.gap }, title: { ...typography.title, color: colors.text }, section: { padding: layout.cardPadding, gap: 12, borderRadius: layout.radius },
+  heading: { ...typography.heading, color: colors.text }, brand: { ...typography.heading, color: colors.accent, fontWeight: '800', letterSpacing: 2 },
+  body: { ...typography.body, color: colors.text }, value: { ...typography.body, color: colors.text, fontWeight: '700' }, infoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, dot: { width: 8, height: 8, borderRadius: 4 }, status: { ...typography.body, flex: 1, fontWeight: '700' },
+  feed: { gap: 6, borderTopWidth: 1, borderColor: colors.border, paddingTop: 12 }, feedTitle: { ...typography.label, color: colors.text, fontWeight: '700' }, feedStatus: { ...typography.label }, endpoint: { ...typography.caption, color: colors.muted },
+  checkButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderRadius: 16, backgroundColor: colors.accentFill, borderColor: colors.accentFill }, checkButtonText: { ...typography.label, color: colors.onAccent, fontWeight: '700' },
 });

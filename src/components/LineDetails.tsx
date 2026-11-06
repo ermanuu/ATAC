@@ -6,7 +6,11 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
 import { visibleVehicles } from '../lib/vehicles';
+import { visibleDepartures, type Departure } from '../lib/departures';
 import { useTheme, type ThemeColors } from '../ui/Theme';
+import { layout, typography } from '../ui/design';
+import { UpdateStatus } from '../ui/UpdateStatus';
+import { DepartureTile } from './DepartureTile';
 
 const BUS_ICON = require('../../assets/bus-front.png');
 
@@ -14,7 +18,7 @@ type Variant = { id: string; headsign: string; direction: string; fromName: stri
 type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; tripId?: string; serviceDate?: string; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
 type Stop = { stop_id: string; name: string; sequence: number; vehiclesAt: Vehicle[]; vehiclesBefore: Vehicle[] };
 type Directions = { route: Route; variants: Variant[] };
-type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: { tripId: string; serviceDate: string; time: number; scheduledTime: number; kind: string }[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
+type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: Departure[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
 
 export function RouteDirections() {
   const { s } = useStyles();
@@ -23,7 +27,7 @@ export function RouteDirections() {
   return <View style={s.stack}>
     <RequestState state={state} />
     {state.data && <>
-      <View style={s.row}><Badge name={state.data.route.name} /><Text style={s.heading}>Scegli la direzione</Text></View>
+      <View style={s.row}><Badge name={state.data.route.name} /><Text accessibilityRole="header" style={s.title}>Scegli la direzione</Text></View>
       <Text style={s.muted}>Verso quale capolinea vuoi andare?</Text>
       {!state.data.variants.length && <Notice text="Nessuna direzione in servizio ora o in partenza nella prossima ora." />}
       {state.data.variants.map(variant => <GlassPressable accessibilityRole="button" accessibilityLabel={`Direzione ${variant.headsign}, da ${variant.fromName}`} key={variant.id}
@@ -59,7 +63,7 @@ export function RouteTimeline() {
   const now = Math.max(tick, state.receivedAt);
   const data = state.data;
   useEffect(() => { if (data) publish({ routeId: id, variant, line: data.route.name, direction: data.selectedVariant.headsign, updating: state.loading }); }, [data, id, variant, publish, state.loading]);
-  const departures = data?.departures.filter(d => now - 600 <= d.time && d.time <= now + 3600) || [];
+  const departures = visibleDepartures(data?.departures || [], now);
   const visibleStops = data?.stops.map(stop => ({ ...stop,
     vehiclesAt: visibleVehicles(stop.vehiclesAt, now, Boolean(state.error)),
     vehiclesBefore: visibleVehicles(stop.vehiclesBefore, now, Boolean(state.error)),
@@ -70,14 +74,15 @@ export function RouteTimeline() {
   return <View style={s.stack}>
     <RequestState state={state} showLoading={!data} />
     {data && <>
-      <GlassSurface style={s.departureStrip}>
-        <Text numberOfLines={1} style={s.departureLabel} accessibilityLabel="Partenze dal capolinea, da dieci minuti fa a un’ora avanti">Partenze da {data.selectedVariant.fromName.toLocaleUpperCase('it-IT')}:</Text>
+      <GlassPressable accessibilityRole="button" accessibilityLabel={`Partenze da ${data.selectedVariant.fromName}, apri tutte le partenze della giornata`} style={s.departureStrip}
+        onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant } })}>
+        <View style={s.departureHeader}><Text numberOfLines={1} style={s.departureLabel}>Partenze da {data.selectedVariant.fromName}</Text><Text style={s.departureLink}>Tutte ›</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.departureScroller} contentContainerStyle={s.departureTrack}>
-          {departures.map((departure, i) => <Text key={`${departure.tripId}-${departure.serviceDate}-${i}`} numberOfLines={1} accessibilityLabel={`Partenza ${clock(departure.time)}, ${departure.kind === 'live' ? 'live' : 'orario programmato'}`} style={[s.departureTime, departure.kind === 'live' && s.liveTime, departure.time < now && s.pastTime, visibleStops[0]?.vehiclesAt.some(v => !v.retained && v.status === 'STOPPED_AT' && v.tripId === departure.tripId && (!v.serviceDate || v.serviceDate === departure.serviceDate)) && s.terminalDeparture]}>{clock(departure.time)} <Text style={s.departureKind}>{departure.kind === 'live' ? 'live' : 'prog.'}</Text></Text>)}
-          {!departures.length && <Text style={s.small}>Nessuna nella fascia −10/+60 min</Text>}
+          {departures.map(departure => <DepartureTile key={`${departure.tripId}-${departure.serviceDate}`} departure={departure} now={now} />)}
+          {!departures.length && <Text style={s.small}>Nessuna partenza tra −5 e +60 minuti</Text>}
         </ScrollView>
-      </GlassSurface>
-      <Text style={s.small}>{data.liveAvailable ? `${positionStamp(data.timestamp)} · Aggiornamento ogni 10 sec.` : 'Posizioni live non disponibili · Aggiornamento ogni 10 sec.'}</Text>
+      </GlassPressable>
+      <UpdateStatus timestamp={data.timestamp} message={!data.liveAvailable || state.error ? 'Posizioni live non disponibili' : undefined} />
       <Text style={s.heading}>Fermate</Text>
       <GlassSurface style={s.timeline}>
         {visibleStops.map((stop, i) => {
@@ -115,17 +120,19 @@ export function RouteTimeline() {
 }
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
-  flex: { flex: 1 }, stack: { gap: 14 }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  heading: { color: colors.text, fontSize: 20, fontWeight: '700', flexShrink: 1 }, muted: { color: colors.muted, fontSize: 14, lineHeight: 21 }, small: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  kicker: { color: colors.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
-  direction: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 26, gap: 12 }, directionName: { color: colors.text, fontSize: 22, fontWeight: '700', marginBottom: 8 }, chevron: { color: colors.accent, fontSize: 30 },
-  departureStrip: { gap: 3, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 },
-  departureLabel: { flexShrink: 0, fontSize: 11, color: colors.muted, fontWeight: '600' }, departureScroller: { height: 26 }, departureTrack: { minHeight: 26, alignItems: 'center', gap: 14, paddingRight: 6 }, departureTime: { fontSize: 14, color: colors.text, fontWeight: '700' }, departureKind: { fontSize: 10, fontWeight: '400' }, liveTime: { color: colors.live }, pastTime: { color: colors.placeholder },
-  terminalDeparture: { color: colors.live, backgroundColor: colors.liveSoft, borderRadius: 5, paddingHorizontal: 5 },
+  flex: { flex: 1 }, stack: { gap: layout.gap }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  title: { ...typography.title, color: colors.text, flexShrink: 1 },
+  heading: { ...typography.heading, color: colors.text, flexShrink: 1 }, muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted },
+  kicker: { ...typography.micro, color: colors.accent, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
+  direction: { flexDirection: 'row', alignItems: 'center', padding: layout.cardPadding, borderRadius: layout.radius, gap: 12 }, directionName: { ...typography.heading, color: colors.text, marginBottom: 8 }, chevron: { color: colors.accent, fontSize: 28 },
+  departureStrip: { gap: 12, borderRadius: layout.radius, padding: layout.cardPadding },
+  departureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  departureLabel: { ...typography.caption, flex: 1, color: colors.muted, fontWeight: '600' }, departureLink: { ...typography.caption, color: colors.accent, fontWeight: '700' },
+  departureScroller: { minHeight: 80, flexGrow: 0 }, departureTrack: { alignItems: 'center', gap: 10 },
   expectedTime: { color: colors.live, backgroundColor: colors.liveSoft, padding: 8, borderRadius: 8, fontSize: 15, fontWeight: '700' },
-  timeline: { borderRadius: 26, paddingVertical: 14, paddingRight: 14, overflow: 'hidden' }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
+  timeline: { borderRadius: layout.radius, paddingVertical: layout.cardPadding, paddingRight: layout.cardPadding, overflow: 'hidden' }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
   vehicleLane: { width: 64, justifyContent: 'center', alignItems: 'center' }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: colors.rail, minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.rail }, lastStop: { backgroundColor: colors.accent, borderColor: colors.accent, borderRadius: 2 },
-  stopName: { flex: 1, justifyContent: 'center', paddingLeft: 12, paddingVertical: 10, minHeight: 48 }, stopText: { color: colors.accent, fontWeight: '700', fontSize: 15, lineHeight: 21 },
+  stopName: { flex: 1, justifyContent: 'center', paddingLeft: 12, paddingVertical: 10, minHeight: 48 }, stopText: { ...typography.body, color: colors.accent, fontWeight: '700' },
   stopTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stopArrow: { color: colors.accent, fontSize: 22 },
   busBefore: { position: 'absolute', top: -12, left: 0, right: 0, height: 26 }, busAt: { height: 26, flexGrow: 0, width: '100%' }, busTrack: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   busButton: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },

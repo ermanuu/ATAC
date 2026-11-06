@@ -2,16 +2,17 @@ import React from 'react';
 import { Pressable, StyleSheet, View, type PressableProps, type ViewProps } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme, type ThemeColors } from './Theme';
+import { layout } from './design';
 
 export const getSurfaceStyle = (colors: ThemeColors) => ({
   backgroundColor: colors.surface,
   borderWidth: 1,
   borderColor: colors.border,
-  borderRadius: 18,
+  borderRadius: layout.radius,
   boxShadow: colors.shadow,
 });
 
-/** Opaque reading surfaces shared by the classic and night themes. */
+/** Opaque reading surfaces shared by the light and dark themes. */
 export function GlassSurface({ children, style, floating = false, ...props }: ViewProps & { floating?: boolean }) {
   const { colors } = useTheme();
   return <View {...props} style={[getSurfaceStyle(colors), floating && { boxShadow: colors.floatingShadow }, style]}>{children}</View>;

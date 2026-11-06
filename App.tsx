@@ -4,6 +4,8 @@ import { LineHeaderProvider, useLineHeader } from './src/lib/LineHeader';
 import { RefreshProvider, useRefresh } from './src/lib/Refresh';
 import { GlassBackground, GlassPressable, GlassSurface, getSurfaceStyle } from './src/ui/Glass';
 import { NavIcon } from './src/ui/NavIcon';
+import { layout, typography } from './src/ui/design';
+import { UpdateStatus } from './src/ui/UpdateStatus';
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/Theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
@@ -38,7 +40,7 @@ export function Notice({ text }: { text: string }) {
 }
 export function Badge({ name }: { name: string }) {
   const { s } = useStyles();
-  return <View style={s.badge}><Text style={s.badgeText}>{name}</Text></View>;
+  return <View style={s.badge}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={s.badgeText}>{name}</Text></View>;
 }
 
 // Abort obsolete requests. Retained line boards check vehicle freshness separately.
@@ -100,14 +102,16 @@ function AppShell() {
   const { title } = useLineHeader();
   const { refresh, refreshing } = useRefresh();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const [logoReady, setLogoReady] = useState(false);
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ id?: string; variant?: string; stopId?: string; fromRouteId?: string; fromVariant?: string; fromLine?: string }>();
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const home = pathname === '/';
   const lineDetail = pathname.startsWith('/line/');
+  const departurePage = lineDetail && pathname.endsWith('/departures');
   const stopDetail = pathname.startsWith('/stop/') || (pathname === '/stops' && Boolean(params.stopId));
-  const board = lineDetail && Boolean(params.id && params.variant);
+  const board = lineDetail && !departurePage && Boolean(params.id && params.variant);
   const lineTitle = title && title.routeId === params.id && title.variant === params.variant ? `${title.line}-${title.direction.toLocaleUpperCase('it-IT')}` : '';
   const detailRefreshing = refreshing || Boolean(board && lineTitle && title?.updating);
   const tab = stopDetail || pathname === '/stops' ? 'stops' : pathname === '/settings' ? 'settings' : pathname === '/plan' ? 'plan' : 'lines';
@@ -117,25 +121,28 @@ function AppShell() {
     if (params.fromRouteId && params.fromVariant) router.replace({ pathname: '/line/[id]/[variant]', params: { id: params.fromRouteId, variant: params.fromVariant } });
     else router.replace('/stops');
   };
+  const returnFromDepartures = () => params.variant
+    ? router.replace({ pathname: '/line/[id]/[variant]', params: { id: params.id!, variant: params.variant } })
+    : router.replace({ pathname: '/line/[id]', params: { id: params.id! } });
   return <View style={s.safe}><GlassBackground /><SafeAreaView edges={['top', 'left', 'right']} style={s.safeContent}><StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
     {!home && !lineDetail && !stopDetail && <View style={s.fixedHeader}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Torna alla home" style={s.headerAction} onPress={() => router.replace('/')}><Text style={s.headerActionText}>← Home</Text></GlassPressable></View>}
 
     {board && <View style={s.boardHeader}>
-      <View style={s.headerLeft}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Torna a cerca linea" style={s.boardAction} onPress={returnToSearch}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={s.boardActionText}>← Cerca linea</Text></GlassPressable></View>
+      <View style={s.headerLeft}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Torna a cerca linea" style={s.boardAction} onPress={returnToSearch}><Text style={s.boardActionText}>← Linee</Text></GlassPressable></View>
       <Text accessibilityRole="header" accessibilityLabel={lineTitle || 'Caricamento linea'} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8} style={s.boardTitle}>{lineTitle || 'Linea…'}</Text>
       <View style={s.headerRight}><GlassPressable floating accessibilityRole="button" accessibilityLabel="Cambia Direzione" style={s.boardAction} onPress={() => router.replace({ pathname: '/line/[id]', params: { id: params.id! } })}><Text style={s.boardActionText}>Cambia Direzione</Text></GlassPressable></View>
     </View>}
     {!board && (lineDetail || stopDetail) && <View style={s.fixedHeader}>
-      <GlassPressable floating accessibilityRole="button" accessibilityLabel={lineDetail ? 'Torna a cerca linea' : params.fromRouteId && params.fromVariant ? 'Torna alla linea' : 'Torna a cerca fermata'} style={[s.headerAction, s.headerReturn]} onPress={lineDetail ? returnToSearch : returnFromStop}>
-        <Text numberOfLines={1} style={s.headerActionText}>{lineDetail ? '← Cerca linea' : params.fromRouteId && params.fromVariant ? `← Torna alla linea ${params.fromLine || ''}` : '← Cerca fermata'}</Text>
+      <GlassPressable floating accessibilityRole="button" accessibilityLabel={departurePage ? 'Torna alla linea' : lineDetail ? 'Torna a cerca linea' : params.fromRouteId && params.fromVariant ? 'Torna alla linea' : 'Torna a cerca fermata'} style={[s.headerAction, s.headerReturn]} onPress={departurePage ? returnFromDepartures : lineDetail ? returnToSearch : returnFromStop}>
+        <Text numberOfLines={1} style={s.headerActionText}>{departurePage ? '← Torna alla linea' : lineDetail ? '← Cerca linea' : params.fromRouteId && params.fromVariant ? `← Torna alla linea ${params.fromLine || ''}` : '← Cerca fermata'}</Text>
       </GlassPressable>
 
     </View>}
     <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={stopDetail ? undefined : <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll]}>
       <Slot />
     </ScrollView></View>
-    {(board || stopDetail) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { bottom: 96 + Math.max(insets.bottom, 12) }]}>
-      <GlassPressable floating accessibilityRole="button" accessibilityLabel={stopDetail ? 'Aggiorna arrivi della fermata' : 'Aggiorna fermate della linea'} aria-busy={detailRefreshing} accessibilityState={{ busy: detailRefreshing, disabled: detailRefreshing }} disabled={detailRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
+    {(board || stopDetail || departurePage) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { right: Math.max(layout.gutter, (width-layout.maxWidth)/2+layout.gutter), bottom: 96 + Math.max(insets.bottom, 12) }]}>
+      <GlassPressable floating accessibilityRole="button" accessibilityLabel={departurePage ? 'Aggiorna partenze della giornata' : stopDetail ? 'Aggiorna arrivi della fermata' : 'Aggiorna fermate della linea'} aria-busy={detailRefreshing} accessibilityState={{ busy: detailRefreshing, disabled: detailRefreshing }} disabled={detailRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
         {detailRefreshing ? <ActivityIndicator accessibilityLabel={stopDetail ? 'Aggiornamento arrivi in corso' : 'Aggiornamento fermate in corso'} color={colors.onAccent} /> : <Text style={s.lineRefreshIcon}>↻</Text>}
       </GlassPressable>
     </View>}
@@ -217,7 +224,7 @@ export function Lines() {
   const results = [...(state.data || [])];
   if (!query.trim() && state.data) for (const r of recent) if (!results.some(item => item.name === r.name)) results.push(r);
   results.sort((a, b) => (rank.get(a.name) ?? 100) - (rank.get(b.name) ?? 100));
-  return <View style={s.stack}><TextInput autoFocus={focus === '1'} accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor={colors.placeholder} keyboardAppearance={scheme} selectionColor={colors.accent} style={s.input} autoCorrect={false} /><RequestState state={state} />
+  return <View style={s.stack}><Text accessibilityRole="header" style={s.pageTitle}>Cerca linea</Text><TextInput autoFocus={focus === '1'} accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor={colors.placeholder} keyboardAppearance={scheme} selectionColor={colors.accent} style={s.input} autoCorrect={false} /><RequestState state={state} />
     {state.data?.length === 0 && <Notice text="Nessuna linea trovata." />}
     {!!recentError && <Notice text={recentError} />}
     {opening && <ActivityIndicator color={colors.accent} />}
@@ -278,7 +285,7 @@ export function Stops() {
   const liveFresh = Boolean(!state.error && state.data?.liveAvailable && state.data.timestamp && now - state.data.timestamp <= 180);
   const arrivals = visibleArrivals(state.data?.arrivals || [], now, liveFresh);
   return <View style={s.stack}>
-    <Text style={s.heading}>{specificStop ? 'Autobus in arrivo' : 'Cerca fermata'}</Text>
+    <Text accessibilityRole="header" style={s.pageTitle}>{specificStop ? 'Autobus in arrivo' : 'Cerca fermata'}</Text>
     {!!favoriteError && <Notice text={favoriteError} />}
     {!specificStop && favorites.length > 0 && <View style={s.stack}>
       <Text style={s.heading}>Preferite</Text>
@@ -287,13 +294,13 @@ export function Stops() {
         <Pressable accessibilityRole="button" accessibilityLabel={`Rimuovi ${favorite.name} dalle preferite`} style={s.favoriteToggle} onPress={() => { void toggleFavorite(favorite); }}><Text style={s.favoriteStar}>★</Text></Pressable>
       </GlassSurface>)}
     </View>}
-    {specificStop && stop ? <GlassSurface style={s.card}><View style={s.row}><Text style={[s.heading, s.flex]}>{stop.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={favorites.some(f => f.stop_id === stop.stop_id) ? 'Rimuovi fermata dalle preferite' : 'Aggiungi fermata alle preferite'} accessibilityState={{ selected: favorites.some(f => f.stop_id === stop.stop_id), disabled: !favoritesReady }} disabled={!favoritesReady} style={s.favoriteToggle} onPress={() => { void toggleFavorite(stop); }}><Text style={s.favoriteStar}>{favorites.some(f => f.stop_id === stop.stop_id) ? '★' : '☆'}</Text></Pressable></View><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassSurface> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
+    {specificStop && stop ? <GlassSurface style={s.card}><View style={s.row}><Text numberOfLines={2} style={[s.heading, s.flex]}>{stop.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={favorites.some(f => f.stop_id === stop.stop_id) ? 'Rimuovi fermata dalle preferite' : 'Aggiungi fermata alle preferite'} accessibilityState={{ selected: favorites.some(f => f.stop_id === stop.stop_id), disabled: !favoritesReady }} disabled={!favoritesReady} style={s.favoriteToggle} onPress={() => { void toggleFavorite(stop); }}><Text style={s.favoriteStar}>{favorites.some(f => f.stop_id === stop.stop_id) ? '★' : '☆'}</Text></Pressable></View><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassSurface> : <StopSearch label="Fermata" selected={stop} onSelect={selected => { if (selected) router.push({ pathname: '/stop/[stopId]', params: { stopId: selected.stop_id, stopName: selected.name } }); else setStop(null); }} />}
     <RequestState state={state} showLoading={!specificStop} />
     {openingRoute && <View style={s.row}><ActivityIndicator color={colors.accent} /><Text style={s.muted}>Apertura itinerario…</Text></View>}
     {!!navigationError && <Notice text={navigationError} />}
     {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
     {state.data && <>
-      <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
+      <UpdateStatus timestamp={state.data.timestamp} message={!liveFresh ? 'Previsioni live non disponibili · solo orari programmati' : arrivals.length > 0 && !arrivals.some(a => a.kind === 'live') ? 'Nessuna previsione live per questa fermata · orari programmati' : undefined} />
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nella prossima ora. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => {
         const departure = nextDeparture(a, now);
@@ -324,7 +331,7 @@ export function Stops() {
 export function Planner() {
   const { s } = useStyles();
   return <View style={s.stack}>
-    <Text accessibilityRole="header" style={s.heading}>Calcola percorso</Text>
+    <Text accessibilityRole="header" style={s.pageTitle}>Calcola percorso</Text>
     <GlassSurface style={s.comingSoon}>
       <NavIcon kind="plan" active />
       <Text style={s.comingSoonTitle}>Funzionalità in arrivo</Text>
@@ -336,36 +343,36 @@ export function Planner() {
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background }, safeContent: { flex: 1 },
   homeLogo: { width: 140, height: 84, alignSelf: 'center' }, launchScreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', gap: 8 }, launchLogo: { width: 180, height: 180 }, launchName: { color: colors.accent, fontWeight: '800', fontSize: 22, letterSpacing: 3, marginBottom: 24 },
-  boardHeader: { minHeight: 60, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }, headerLeft: { width: 96 }, headerRight: { width: 96 }, boardAction: { minHeight: 44, borderRadius: 22, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' }, boardActionText: { color: colors.accent, fontWeight: '700', fontSize: 10, lineHeight: 14, textAlign: 'center' }, boardTitle: { flex: 1, textAlign: 'center', color: colors.text, fontWeight: '800', fontSize: 12, lineHeight: 16 },
-  fixedHeader: { minHeight: 56, paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', gap: 8, marginBottom: 12 },
-  headerAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 22 }, headerReturn: { maxWidth: '100%' }, headerActionText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
-  homeContent: { paddingHorizontal: 24 }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 24, width: '100%', maxWidth: 420, alignSelf: 'center', paddingTop: 12, paddingBottom: 36 }, homeHeader: { gap: 10, alignItems: 'center' }, homeActions: { gap: 12 }, eyebrow: { fontSize: 24, fontWeight: '800', color: colors.accent, letterSpacing: 3 }, homeTitle: { fontSize: 30, fontWeight: '800', color: colors.text, marginTop: 6, letterSpacing: -1, textAlign: 'center' }, homeSubtitle: { color: colors.muted, fontSize: 15, textAlign: 'center' }, flex: { flex: 1 }, stack: { gap: 14 },
+  boardHeader: { minHeight: 64, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }, headerLeft: { width: 88 }, headerRight: { width: 88 }, boardAction: { minHeight: 48, borderRadius: 20, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' }, boardActionText: { ...typography.caption, color: colors.accent, fontWeight: '700', textAlign: 'center' }, boardTitle: { ...typography.label, flex: 1, textAlign: 'center', color: colors.text, fontWeight: '800' },
+  fixedHeader: { minHeight: 64, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: layout.gutter, paddingVertical: 8, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', gap: 8, marginBottom: 8 },
+  headerAction: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 20 }, headerReturn: { maxWidth: '100%' }, headerActionText: { ...typography.label, color: colors.accent, fontWeight: '700' },
+  homeContent: { paddingHorizontal: layout.gutter }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 24, width: '100%', maxWidth: 420, alignSelf: 'center', paddingTop: 12, paddingBottom: 36 }, homeHeader: { gap: 10, alignItems: 'center' }, homeActions: { gap: 12 }, eyebrow: { fontSize: 24, fontWeight: '800', color: colors.accent, letterSpacing: 3 }, homeTitle: { fontSize: 30, lineHeight: 36, fontWeight: '800', color: colors.text, marginTop: 6, letterSpacing: -1, textAlign: 'center' }, homeSubtitle: { ...typography.body, color: colors.muted, textAlign: 'center' }, flex: { flex: 1, minWidth: 0 }, stack: { gap: layout.gap },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   livePill: { fontSize: 11, fontWeight: '600', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.surface, overflow: 'hidden' },
-  homeAction: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14, borderRadius: 26, minHeight: 78 }, homeActionIcon: { width: 44, height: 44, borderRadius: 16, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' }, homeActionText: { color: colors.text, fontSize: 17, fontWeight: '700' },
+  homeAction: { flexDirection: 'row', alignItems: 'center', padding: layout.cardPadding, gap: 14, borderRadius: layout.radius, minHeight: 78 }, homeActionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' }, homeActionText: { ...typography.body, color: colors.text, fontWeight: '700' },
   bottomDock: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 12 }, bottomBar: { flexDirection: 'row', borderRadius: 32, padding: 6, maxWidth: 460, width: '100%', alignSelf: 'center' },
-  bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: colors.accentSoft, boxShadow: 'none' }, bottomTabPressed: { backgroundColor: colors.pressed }, bottomTabText: { color: colors.muted, fontSize: 11, fontWeight: '600' }, bottomTabSelected: { color: colors.accent, fontWeight: '800' }, bottomTabUnavailable: { opacity: 0.5 },
-  content: { flex: 1, paddingHorizontal: 20 }, scroll: { paddingBottom: 140, gap: 14 }, heading: { color: colors.text, fontSize: 20, fontWeight: '700', flexShrink: 1 },
+  bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: colors.accentSoft, boxShadow: 'none' }, bottomTabPressed: { backgroundColor: colors.pressed }, bottomTabText: { ...typography.micro, color: colors.muted, fontWeight: '600' }, bottomTabSelected: { color: colors.accent, fontWeight: '800' }, bottomTabUnavailable: { opacity: 0.5 },
+  content: { flex: 1, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: layout.gutter }, scroll: { paddingBottom: 140, gap: layout.gap }, pageTitle: { ...typography.title, color: colors.text }, heading: { ...typography.heading, color: colors.text, flexShrink: 1 },
   boardScroll: { paddingBottom: 190 },
   lineRefreshDock: { position: 'absolute', right: 20 }, lineRefreshButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, lineRefreshIcon: { fontSize: 30, color: colors.onAccent, lineHeight: 34 },
-  muted: { color: colors.muted, fontSize: 14, lineHeight: 21 }, small: { color: colors.muted, fontSize: 11, lineHeight: 16 }, body: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  input: { ...getSurfaceStyle(colors), borderRadius: 24, paddingHorizontal: 16, paddingVertical: 16, color: colors.text, fontSize: 16, marginVertical: 12 },
-  route: { padding: 16, flexDirection: 'row', gap: 14, alignItems: 'center' },
-  badge: { minWidth: 52, borderRadius: 12, padding: 12, backgroundColor: colors.accentFill, alignItems: 'center', borderWidth: 1, borderColor: colors.accentFill }, badgeText: { color: colors.onAccent, fontSize: 18, fontWeight: '800' },
-  arrow: { fontSize: 28, color: colors.accent }, time: { fontSize: 20, fontWeight: '700', color: colors.text },
-  favoriteRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }, favoriteOpen: { flex: 1, paddingVertical: 16, gap: 4 }, favoriteToggle: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, favoriteStar: { fontSize: 27, color: colors.accent },
+  muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted }, body: { ...typography.body, color: colors.text, fontWeight: '600' },
+  input: { ...getSurfaceStyle(colors), ...typography.body, minHeight: 56, borderRadius: layout.radius, paddingHorizontal: layout.cardPadding, paddingVertical: 16, color: colors.text, marginVertical: 8 },
+  route: { padding: layout.cardPadding, flexDirection: 'row', gap: 14, alignItems: 'center' },
+  badge: { width: 52, minHeight: 52, borderRadius: 12, paddingHorizontal: 4, paddingVertical: 12, backgroundColor: colors.accentFill, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.accentFill }, badgeText: { color: colors.onAccent, fontSize: 18, lineHeight: 24, fontWeight: '800' },
+  arrow: { fontSize: 28, color: colors.accent }, time: { ...typography.time, color: colors.text },
+  favoriteRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }, favoriteOpen: { flex: 1, minWidth: 0, paddingVertical: 16, gap: 4 }, favoriteToggle: { flexShrink: 0, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, favoriteStar: { fontSize: 27, color: colors.accent },
   liveEta: { color: colors.live },
-  arrivalCard: { padding: 14, justifyContent: 'center' }, arrivalRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, arrivalBadge: { width: 56 }, arrivalDetails: { flex: 1, minWidth: 0, gap: 3 }, arrivalDestination: { lineHeight: 20 }, arrivalStatus: { fontSize: 10.5, lineHeight: 16 }, vehicleNumber: { color: colors.muted, fontSize: 12, lineHeight: 17 },
-  arrivalTiming: { width: 72, alignItems: 'flex-end', justifyContent: 'center', gap: 3 }, departureLabel: { color: colors.muted, fontSize: 10, lineHeight: 12, fontWeight: '600', textAlign: 'right' }, departureClock: { color: colors.live, fontSize: 20, lineHeight: 24, fontWeight: '800' }, timingNote: { color: colors.muted, fontSize: 10, lineHeight: 13, textAlign: 'right' },
+  arrivalCard: { padding: layout.cardPadding, justifyContent: 'center' }, arrivalRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, arrivalBadge: { width: 52 }, arrivalDetails: { flex: 1, minWidth: 0, gap: 3 }, arrivalDestination: { lineHeight: 22 }, arrivalStatus: { ...typography.micro }, vehicleNumber: { ...typography.caption, color: colors.muted },
+  arrivalTiming: { width: 76, alignItems: 'flex-end', justifyContent: 'center', gap: 3 }, departureLabel: { ...typography.micro, color: colors.muted, fontWeight: '600', textAlign: 'right' }, departureClock: { ...typography.time, color: colors.live }, timingNote: { ...typography.micro, color: colors.muted, textAlign: 'right' },
   arrivalImminent: { fontSize: 16, lineHeight: 24 },
-  button: { padding: 16, borderRadius: 18, alignItems: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, buttonText: { color: colors.onAccent, fontWeight: '700', fontSize: 15 }, buttonDisabled: { backgroundColor: colors.disabled, borderColor: colors.border }, buttonDisabledText: { color: colors.muted },
-  notice: { padding: 14, borderRadius: 20, marginVertical: 8 }, card: { borderRadius: 24, padding: 18, gap: 12 },
+  button: { minHeight: 48, padding: 14, borderRadius: 16, alignItems: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, buttonText: { ...typography.label, color: colors.onAccent, fontWeight: '700' }, buttonDisabled: { backgroundColor: colors.disabled, borderColor: colors.border }, buttonDisabledText: { color: colors.muted },
+  notice: { padding: layout.cardPadding, borderRadius: layout.radius, marginVertical: 8 }, card: { borderRadius: layout.radius, padding: layout.cardPadding, gap: 12 },
   link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
-  label: { color: colors.text, fontSize: 13, fontWeight: '700' }, stop: { padding: 14, marginBottom: 8 },
-  homeActionLabel: { flex: 1, gap: 4 }, homeActionHint: { color: colors.muted, fontSize: 12, lineHeight: 17 }, homeActionUnavailable: { backgroundColor: colors.surfaceAlt },
+  label: { ...typography.label, color: colors.text, fontWeight: '700' }, stop: { padding: layout.cardPadding, marginBottom: 8 },
+  homeActionLabel: { flex: 1, gap: 4 }, homeActionHint: { ...typography.caption, color: colors.muted }, homeActionUnavailable: { backgroundColor: colors.surfaceAlt },
   homeSettingsDock: { marginTop: 'auto' },
-  comingSoon: { padding: 24, gap: 14, alignItems: 'flex-start' }, comingSoonTitle: { color: colors.accent, fontSize: 20, fontWeight: '700' },
-  homeSettings: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: 18, paddingVertical: 12 }, homeSettingsText: { flex: 1, color: colors.text, fontSize: 15, fontWeight: '600' },
+  comingSoon: { padding: layout.cardPadding, gap: layout.gap, alignItems: 'flex-start' }, comingSoonTitle: { ...typography.heading, color: colors.accent },
+  homeSettings: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: layout.cardPadding, paddingVertical: 12 }, homeSettingsText: { ...typography.body, flex: 1, color: colors.text, fontWeight: '600' },
 });
 
 function useStyles() {

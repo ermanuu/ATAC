@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme, type ThemeColors, type ThemePreference } from '../ui/Theme';
+import { typography } from '../ui/design';
 
 const options: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: 'Automatico' },
@@ -25,5 +26,5 @@ export function ThemePicker() {
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   picker: { gap: 10 }, options: { flexDirection: 'row', gap: 4, padding: 4, borderRadius: 16, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   option: { flex: 1, minHeight: 48, paddingHorizontal: 4, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 12 }, selected: { backgroundColor: colors.accentFill }, pressed: { opacity: 0.8 },
-  text: { color: colors.muted, fontSize: 12, fontWeight: '600', textAlign: 'center' }, selectedText: { color: colors.onAccent, fontWeight: '800' }, description: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  text: { ...typography.label, color: colors.muted, textAlign: 'center' }, selectedText: { color: colors.onAccent, fontWeight: '800' }, description: { ...typography.caption, color: colors.muted },
 });

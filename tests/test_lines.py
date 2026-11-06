@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from google.transit import gtfs_realtime_pb2 as pb
 from server import transit as t
 from server.app import Handler
+from server.lines import daily_departures
 from test_transit import fixture
 
 
@@ -186,11 +187,11 @@ class LineTests(unittest.TestCase):
         self.assertEqual(self.read.call_args_list[-1].kwargs, {'force':True})
 
     def test_departure_window_includes_exact_bounds(self):
-        for name, at in [('too_early', 35399), ('start',35400), ('recent',35940), ('end',39600), ('too_late',39601)]:
+        for name, at in [('too_early', 35699), ('start',35700), ('recent',35940), ('end',39600), ('too_late',39601)]:
             self.add_trip(name, at)
         result = self.board()
         self.assertEqual([d['tripId'] for d in result['departures']], ['start','recent','t1','end'])
-        self.assertEqual(result['window'], {'from': self.now-600, 'to': self.now+3600})
+        self.assertEqual(result['window'], {'from': self.now-300, 'to': self.now+3600})
         self.assertTrue(all(d['kind'] == 'scheduled' for d in result['departures']))
 
     def test_same_headsign_different_pattern_gets_separate_choice(self):
@@ -235,13 +236,74 @@ class LineTests(unittest.TestCase):
         self.assertEqual(self.board()['departures'][0]['kind'], 'scheduled')
 
     def test_live_predictions_are_filtered_by_adjusted_time(self):
-        self.add_trip('late', 35399)
+        self.add_trip('late', 35699)
         f = self.feed('updates')
         e=f.entity.add(); e.id='late'; e.trip_update.trip.trip_id='late'
         event=e.trip_update.stop_time_update.add(); event.stop_sequence=10; event.departure.delay=120
         self.assertIn('late', [d['tripId'] for d in self.board()['departures']])
         event.departure.time=self.now+3601
         self.assertNotIn('late', [d['tripId'] for d in self.board()['departures']])
+
+    def test_daily_departures_include_finished_and_later_trips_in_the_selected_pattern(self):
+        self.add_trip('morning', 6*3600)
+        self.add_trip('evening', 23*3600)
+        self.add_trip('different-pattern', 12*3600, stops=('a', 'c'))
+        result = daily_departures('r1', self.variant(), self.now)
+        self.assertEqual([d['tripId'] for d in result['departures']], ['morning', 't1', 'evening'])
+        self.assertEqual(result['date'], '2026-10-30')
+
+    def test_daily_departures_start_at_midnight_and_exclude_next_midnight(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("INSERT INTO exceptions VALUES ('daily','20261029',2)")
+        self.add_trip('midnight', 0)
+        self.add_trip('last', 24*3600-1)
+        self.add_trip('next-day', 24*3600)
+        result = daily_departures('r1', self.variant(), self.now)
+        self.assertEqual([d['tripId'] for d in result['departures']], ['midnight', 't1', 'last'])
+        self.assertEqual(result['window']['to']-result['window']['from'], 86400)
+
+    def test_daily_departures_include_previous_service_day_after_24_hours(self):
+        self.now = int(datetime(2026,10,31,0,59,tzinfo=t.ROME).timestamp())
+        result = daily_departures('r1', self.variant('Notturno'), self.now)
+        self.assertEqual(result['date'], '2026-10-31')
+        self.assertEqual([d['tripId'] for d in result['departures']], ['night'])
+        self.assertEqual(result['departures'][0]['serviceDate'], '20261030')
+
+    def test_daily_departure_window_uses_rome_calendar_day_on_dst_change(self):
+        self.now = int(datetime(2026,10,25,10,0,tzinfo=t.ROME).timestamp())
+        result = daily_departures('r1', self.variant(), self.now)
+        self.assertEqual(result['window']['to']-result['window']['from'], 25*3600)
+        self.assertTrue(all(result['window']['from'] <= d['time'] < result['window']['to'] for d in result['departures']))
+
+    def test_daily_departures_apply_live_departure_and_cancellation(self):
+        f = self.feed('updates')
+        self.add_trip('canceled', 11*3600)
+        u = f.entity.add(); u.id = 'updated'; u.trip_update.trip.trip_id = 't1'
+        event = u.trip_update.stop_time_update.add(); event.stop_id = 'a'; event.departure.delay = 120
+        u = f.entity.add(); u.id = 'canceled'; u.trip_update.trip.trip_id = 'canceled'
+        u.trip_update.trip.schedule_relationship = pb.TripDescriptor.CANCELED
+        result = daily_departures('r1', self.variant(), self.now, refresh=True)
+        self.assertEqual([d['tripId'] for d in result['departures']], ['t1'])
+        self.assertEqual(result['departures'][0]['time'], self.now+120)
+        self.assertEqual(result['departures'][0]['kind'], 'live')
+        self.assertEqual(self.read.call_args_list[-1].kwargs, {'force': True})
+
+    def test_parked_bus_is_identified_even_after_scheduled_departure(self):
+        self.add_trip('late-parked', 35940)
+        self.vehicle(self.feed('vehicles'), 'parked', trip='late-parked', stop='a', sequence=10)
+        for result in (self.board(), daily_departures('r1', self.variant(), self.now)):
+            item = next(d for d in result['departures'] if d['tripId'] == 'late-parked')
+            self.assertTrue(item['atTerminus'])
+            self.assertFalse(item['departed'])
+            self.assertEqual(item['positionTimestamp'], self.now)
+
+    def test_bus_beyond_origin_is_marked_departed_and_retained_positions_are_ignored(self):
+        self.vehicle(self.feed('vehicles'), 'moving', stop='b', sequence=20, status=pb.VehiclePosition.IN_TRANSIT_TO)
+        item = self.board()['departures'][0]
+        self.assertTrue(item['departed'])
+        self.assertFalse(item['atTerminus'])
+        self.feeds['vehicles']['retained'] = ['moving']
+        self.assertNotIn('departed', self.board()['departures'][0])
 
     def test_wrong_day_and_stale_update_keep_scheduled_time(self):
         f = self.feed('updates')

@@ -48,6 +48,13 @@ class HttpCacheTests(unittest.TestCase):
             self.assertEqual(app.api_response('/api/stops/74351/arrivals').result['arrivals'], ['new feed'])
             self.assertEqual(calculate.call_count, 3)
 
+    def test_daily_departure_endpoint_preserves_direction_and_forces_refresh(self):
+        with patch('server.lines.daily_departures', return_value={'departures': []}) as calculate:
+            value = app.api_response('/api/routes/706/departures?variant=direction&fresh=1')
+            self.assertEqual(value.code, 200)
+            self.assertEqual(value.result, {'departures': []})
+            calculate.assert_called_once_with('706', 'direction', refresh=True)
+
     def test_replacing_the_dataset_invalidates_cached_searches(self):
         t.DB.write_bytes(b'first')
         with patch.object(t, 'routes', return_value=['old']) as calculate:

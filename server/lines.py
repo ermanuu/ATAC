@@ -1,6 +1,6 @@
 """Direction-specific line boards, using the existing GTFS database."""
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import math
@@ -23,8 +23,8 @@ def variant_id(direction, headsign, stop_ids):
     return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
-def patterns(db, route_id, now):
-    windows = list(t.service_windows(db, now, 3600))
+def patterns(db, route_id, now, horizon=3600):
+    windows = list(t.service_windows(db, now, horizon))
     key = (db.generation, route_id, tuple((epoch, frozenset(active)) for epoch, active in windows))
     groups, sequences = _patterns.get(key, lambda: load_patterns(db, route_id, windows), ttl=3600)
     return groups, sequences, windows
@@ -64,7 +64,9 @@ def summary(group):
     return {k: v for k, v in group.items() if k not in ('stops', 'trips')}
 
 
-def terminal_departures(group, sequences, windows, now, live):
+def terminal_departures(group, sequences, windows, now, live, start=None, end=None):
+    start = now - 300 if start is None else start
+    end = now + 3600 if end is None else end
     updates = {}
     if live['available']:
         for entity in live['feed'].entity:
@@ -106,9 +108,56 @@ def terminal_departures(group, sequences, windows, now, live):
                         elif prediction.HasField('delay'):
                             item.update(time=scheduled + prediction.delay, kind='live')
                     break
-            if not skipped and now - 600 <= item['time'] <= now + 3600:
+            if not skipped and start <= item['time'] <= end:
                 result.append(item)
     return sorted(result, key=lambda i: (i['time'], i['tripId']))
+
+
+def departure_positions(departures, stops):
+    """Keep a bus still at the origin from being called departed by the clock."""
+    observations = defaultdict(list)
+    for index, stop in enumerate(stops):
+        for vehicle in (*stop['vehiclesAt'], *stop['vehiclesBefore']):
+            if not vehicle['retained']:
+                observations[vehicle['tripId']].append((index, vehicle))
+    for departure in departures:
+        matching = [(index, vehicle) for index, vehicle in observations[departure['tripId']]
+                    if not vehicle['serviceDate'] or vehicle['serviceDate'] == departure['serviceDate']]
+        if matching:
+            departure['atTerminus'] = all(index == 0 and vehicle['status'] == 'STOPPED_AT' and
+                                          vehicle['placement'] == 'at' for index, vehicle in matching)
+            departure['departed'] = all(index > 0 for index, _ in matching)
+            departure['positionTimestamp'] = min(vehicle['timestamp'] for _, vehicle in matching)
+    return departures
+
+
+def daily_departures(route_id, variant, now=None, refresh=False):
+    """Departures occurring today in Rome, including the previous GTFS service day."""
+    use_current_clock = now is None
+    now = int(time.time()) if now is None else now
+    day = datetime.fromtimestamp(now, t.ROME).date()
+    start = int(datetime.combine(day, datetime.min.time(), t.ROME).timestamp())
+    end = int(datetime.combine(day + timedelta(days=1), datetime.min.time(), t.ROME).timestamp())
+    with t.connect() as db:
+        route = db.execute('SELECT * FROM routes WHERE route_id=? AND type=3', (route_id,)).fetchone()
+        if not route:
+            raise ValueError('Linea autobus non trovata')
+        groups, sequences, windows = patterns(db, route_id, start, end-start-1)
+        selected = next((g for g in groups if g['id'] == variant), None)
+        if selected is None:
+            raise ValueError('Direzione non disponibile: torna alla scelta della direzione')
+    vehicles = t.read_live('vehicles', refresh)
+    updates = t.read_live('updates', refresh)
+    if use_current_clock:
+        now = int(time.time())
+        if datetime.fromtimestamp(now, t.ROME).date() != day:
+            return daily_departures(route_id, variant, refresh=refresh)
+    stops, _ = place_vehicles(selected, groups, sequences, now, vehicles, updates, windows)
+    departures = terminal_departures(selected, sequences, windows, now, updates, start, end-1)
+    return {'route': dict(route), 'selectedVariant': summary(selected), 'date': day.isoformat(),
+            'window': {'from': start, 'to': end},
+            'departures': departure_positions(departures, stops),
+            'liveAvailable': updates['available'], 'timestamp': updates['timestamp']}
 
 
 def stop_distance(lat, lon, stop):
@@ -299,8 +348,8 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
         now = int(time.time())
     positioned_stops, unplaced = place_vehicles(selected, groups, sequences, now, vehicles, updates, windows)
     result.update(selectedVariant=summary(selected), stops=positioned_stops,
-                  departures=terminal_departures(selected, sequences, windows, now, updates),
-                  window={'from': now - 600, 'to': now + 3600},
+                  departures=departure_positions(terminal_departures(selected, sequences, windows, now, updates), positioned_stops),
+                  window={'from': now - 300, 'to': now + 3600},
                   liveAvailable=vehicles['available'], timestamp=vehicles['timestamp'],
                   departureLiveAvailable=updates['available'], departureTimestamp=updates['timestamp'],
                   unplacedVehicleCount=unplaced)
