@@ -25,11 +25,6 @@ export function RouteDirections() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const state = useData<Directions>(id ? `routes/${encodeURIComponent(id)}` : null, 10000, true);
   const inactiveVariants = state.data?.inactiveVariants ?? state.data?.timetableVariants?.filter(v => !state.data?.variants.some(active => active.id === v.id)) ?? [];
-  const groups = new Map<string, Variant[]>();
-  for (const variant of inactiveVariants) {
-    const category = variant.category || 'Altre varianti';
-    groups.set(category, [...(groups.get(category) || []), variant]);
-  }
   return <View style={[s.stack, s.directionPage]}>
     <RequestState state={state} />
     {state.data && <>
@@ -40,15 +35,29 @@ export function RouteDirections() {
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
         <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text>{variant.category && variant.category !== 'Ordinaria' && <Text style={s.small}>{variant.category}</Text>}<Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
       </GlassPressable>)}
-      {inactiveVariants.length > 0 && <View style={s.inactiveSection}>
-        <Text accessibilityRole="header" style={s.inactiveHeading}>Non attive</Text>
-        {[...groups].flatMap(([category, variants]) => variants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}, ${category}`} style={s.inactiveDirection}
-            onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant: variant.id, fromDirections: '1' } })}>
-            <View style={[s.flex, s.inactiveDetails]}><Text style={s.inactiveName}>{variant.headsign}</Text><Text style={s.inactiveCategory}>{category}</Text><Text style={s.small}>Da {variant.fromName}</Text></View><Text style={s.inactiveArrow}>›</Text>
-          </GlassPressable>))}
-      </View>}
+      {inactiveVariants.length > 0 && <InactiveDirections key={id} routeId={id} variants={inactiveVariants} />}
     </>}
   </View>;
+}
+
+function InactiveDirections({ routeId, variants }: { routeId: string; variants: Variant[] }) {
+  const { s } = useStyles();
+  const [inactiveOpen, setInactiveOpen] = useState(false);
+  const groups = new Map<string, Variant[]>();
+  for (const variant of variants) {
+    const category = variant.category || 'Altre varianti';
+    groups.set(category, [...(groups.get(category) || []), variant]);
+  }
+  return <View style={s.inactiveSection}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Non attive" accessibilityHint={inactiveOpen ? 'Nasconde le direzioni non attive' : 'Mostra le direzioni non attive e i loro orari'} accessibilityState={{ expanded: inactiveOpen }} aria-expanded={inactiveOpen}
+          onPress={() => setInactiveOpen(open => !open)} style={({ pressed }) => [s.inactiveToggle, pressed && s.inactiveTogglePressed]}>
+          <Text style={s.inactiveHeading}>Non attive</Text><Text accessible={false} style={s.inactiveCaret}>{inactiveOpen ? '⌄' : '⌃'}</Text>
+        </Pressable>
+        {inactiveOpen && <View style={s.inactiveList}>{[...groups].flatMap(([category, variants]) => variants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}, ${category}`} style={s.inactiveDirection}
+            onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id: routeId, variant: variant.id, fromDirections: '1' } })}>
+            <View style={[s.flex, s.inactiveDetails]}><Text style={s.inactiveName}>{variant.headsign}</Text><Text style={s.inactiveCategory}>{category}</Text><Text style={s.small}>Da {variant.fromName}</Text></View><Text style={s.inactiveArrow}>›</Text>
+          </GlassPressable>))}</View>}
+      </View>;
 }
 
 function BusThumbnail({ vehicle, caption, onPress, image }: { vehicle: Vehicle; caption: string; onPress: () => void; image: ImageRef | null }) {
@@ -138,6 +147,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   flex: { flex: 1 }, stack: { gap: layout.gap }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   directionPage: { flexGrow: 1 },
   inactiveSection: { marginTop: 'auto', paddingTop: 28, gap: 12 }, inactiveHeading: { ...typography.body, color: colors.muted, fontWeight: '700' },
+  inactiveToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, gap: 12 }, inactiveTogglePressed: { opacity: 0.7 }, inactiveCaret: { color: colors.muted, fontSize: 24, lineHeight: 28 }, inactiveList: { gap: 12 },
   inactiveDetails: { gap: 2 }, inactiveCategory: { ...typography.caption, color: colors.muted, fontWeight: '600' },
   inactiveDirection: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, backgroundColor: colors.surfaceAlt, minHeight: 64 },
   inactiveName: { ...typography.body, color: colors.muted, fontWeight: '600' }, inactiveArrow: { fontSize: 22, color: colors.muted },

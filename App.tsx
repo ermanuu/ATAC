@@ -188,6 +188,7 @@ export function Home() {
       })}
     </View>
     <View style={s.homeSettingsDock}>
+      <Text style={s.homeDisclaimer}>Il presente è un progetto indipendente.{'\n'}NON è affiliato, autorizzato o connesso ad ATAC S.p.A. e/o Roma Servizi per la Mobilità.{'\n'}I dati in tempo reale sono open source e forniti ufficialmente da Roma Servizi per la Mobilità.</Text>
       <GlassPressable accessibilityRole="button" accessibilityLabel="Apri impostazioni" onPress={() => router.push('/settings')} style={s.homeSettings}>
         <NavIcon kind="settings" active /><Text style={s.homeSettingsText}>Impostazioni</Text><Text style={s.arrow}>›</Text>
       </GlassPressable>
@@ -373,7 +374,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
   label: { ...typography.label, color: colors.text, fontWeight: '700' }, stop: { padding: layout.cardPadding, marginBottom: 8 },
   homeActionLabel: { flex: 1, gap: 4 }, homeActionHint: { ...typography.caption, color: colors.muted }, homeActionUnavailable: { backgroundColor: colors.surfaceAlt },
-  homeSettingsDock: { marginTop: 'auto' },
+  homeSettingsDock: { marginTop: 'auto', gap: 16 }, homeDisclaimer: { ...typography.micro, color: colors.muted },
   comingSoon: { padding: layout.cardPadding, gap: layout.gap, alignItems: 'flex-start' }, comingSoonTitle: { ...typography.heading, color: colors.accent },
   homeSettings: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: layout.cardPadding, paddingVertical: 12 }, homeSettingsText: { ...typography.body, flex: 1, color: colors.text, fontWeight: '600' },
 });
