@@ -75,12 +75,6 @@ def summary(group):
     return {k: v for k, v in group.items() if k not in ('stops', 'trips')}
 
 
-def timetable_key(group):
-    # Stop-by-stop variants may change by weekday; the terminus timetable
-    # includes every path serving this direction and the same two termini.
-    return (group['direction'], group['headsign'], group['stops'][0]['stop_id'], group['stops'][-1]['stop_id'])
-
-
 def terminal_departures(group, sequences, windows, now, live, start=None, end=None):
     start = now - 300 if start is None else start
     end = now + DEPARTURE_WINDOW_SECONDS if end is None else end
@@ -197,12 +191,13 @@ def daily_departures(route_id, variant, now=None, refresh=False, date=None):
         if selected is None:
             raise ValueError('Direzione non disponibile: torna alla scelta della direzione')
         windows = list(t.service_windows(db, start, end-start-1))
-        key = timetable_key(selected)
-        trips = {trip_id: trip for group in groups if timetable_key(group) == key
-                 for trip_id, trip in group['trips'].items()}
-        departures = terminal_departures(selected | {'trips': trips}, sequences, windows, now,
+        # A timetable belongs to one ordered stop sequence. Shared termini do
+        # not make ordinary, school and holiday paths interchangeable.
+        departures = terminal_departures(selected, sequences, windows, now,
                                          {'available': False}, start, end-1)
-    return {'route': dict(route), 'selectedVariant': summary(selected), 'date': day.isoformat(),
+        from .variant_types import variant_summaries
+        selected_summary = next(v for v in variant_summaries(route['name'], groups, sequences) if v['id'] == variant)
+    return {'route': dict(route), 'selectedVariant': selected_summary, 'date': day.isoformat(),
             'window': {'from': start, 'to': end}, 'nightService': night,
             'scheduleOnly': True, 'departures': departures}
 
@@ -384,13 +379,14 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
             for epoch, active in windows for trip_id, trip in g['trips'].items())]
         result = {'route': dict(route), 'variants': [summary(g) for g in active_groups]}
         if not variant:
-            from .variant_types import inactive_variants
-            catalogue, _ = catalogue_patterns(db, route_id)
-            choices = {}
-            for group in catalogue:
-                choices.setdefault(timetable_key(group), summary(group))
-            result['timetableVariants'] = list(choices.values())
-            result['inactiveVariants'] = inactive_variants(route_id, catalogue, {g['id'] for g in active_groups})
+            from .variant_types import variant_summaries
+            catalogue, catalogue_sequences = catalogue_patterns(db, route_id)
+            choices = variant_summaries(route['name'], catalogue, catalogue_sequences)
+            active_ids = {g['id'] for g in active_groups}
+            descriptions = {v['id']: v for v in choices}
+            result['variants'] = [descriptions[g['id']] for g in active_groups]
+            result['timetableVariants'] = choices
+            result['inactiveVariants'] = [v for v in choices if v['id'] not in active_ids]
     if not variant:
         # The direction picker needs no realtime requests, vehicle list or stop list.
         return result

@@ -385,7 +385,7 @@ class LineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Data non valida'):
                 daily_departures('r1', selected, self.now, date=invalid)
 
-    def test_timetable_includes_weekday_variants_with_the_same_direction_and_termini(self):
+    def test_timetables_keep_weekday_paths_separate_even_with_the_same_termini(self):
         self.add_trip('weekend-path', 11*3600, stops=('a','c','b'))
         with sqlite3.connect(t.DB) as db:
             db.execute("UPDATE trips SET service_id='weekend' WHERE trip_id='weekend-path'")
@@ -394,9 +394,41 @@ class LineTests(unittest.TestCase):
         friday = daily_departures('r1', selected, self.now, date='2026-10-30')
         saturday = daily_departures('r1', selected, self.now, date='2026-10-31')
         self.assertEqual([d['tripId'] for d in friday['departures']], ['t1'])
-        self.assertEqual([d['tripId'] for d in saturday['departures']], ['weekend-path'])
+        self.assertEqual(saturday['departures'], [])
         choices = t.route_detail('r1', now=self.now)['timetableVariants']
-        self.assertEqual(len([v for v in choices if v['headsign']=='Cambio']), 1)
+        choices = [v for v in choices if v['headsign']=='Cambio']
+        self.assertEqual(len(choices), 2)
+        weekend = next(v for v in choices if v['id'] != selected)
+        friday_detour = daily_departures('r1', weekend['id'], self.now, date='2026-10-30')
+        saturday_detour = daily_departures('r1', weekend['id'], self.now, date='2026-10-31')
+        self.assertEqual(friday_detour['departures'], [])
+        self.assertEqual([d['tripId'] for d in saturday_detour['departures']], ['weekend-path'])
+
+    def test_same_day_detour_cannot_inherit_ordinary_departures(self):
+        self.add_trip('detour', 12*3600, stops=('a','c','b'))
+        picker = t.route_detail('r1', now=self.now)
+        variant = next(v for v in picker['inactiveVariants'] if v['stopCount']==3)
+        ordinary = daily_departures('r1', self.variant(), self.now)
+        detour = daily_departures('r1', variant['id'], self.now)
+        self.assertEqual([d['tripId'] for d in ordinary['departures']], ['t1'])
+        self.assertEqual([d['tripId'] for d in detour['departures']], ['detour'])
+        self.read.assert_not_called()
+
+    def test_school_profiles_use_the_public_line_name_and_keep_their_own_trips(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE routes SET name='708' WHERE route_id='r1'")
+        for trip, minute in [('school-1',427),('school-2',436),('school-3',774),('school-4',830)]:
+            self.add_trip(trip, minute*60, stops=('a','c','b'))
+        self.add_trip('ordinary-late', 22*3600)
+        picker = t.route_detail('r1', now=self.now)
+        school = next(v for v in picker['inactiveVariants'] if v.get('schoolCode')=='DS')
+        self.assertEqual(school['category'], 'Deviata scolastica')
+        timetable = daily_departures('r1', school['id'], self.now)
+        self.assertEqual([d['tripId'] for d in timetable['departures']], ['school-1','school-2','school-3','school-4'])
+        self.assertEqual(timetable['selectedVariant']['schoolCode'], 'DS')
+        morning = t.route_detail('r1', now=self.now-3*3600)
+        self.assertEqual(next(v for v in morning['variants'] if v['id']==school['id'])['category'],'Deviata scolastica')
+        self.read.assert_not_called()
 
     def test_bus_beyond_origin_is_marked_departed_and_retained_positions_are_ignored(self):
         self.vehicle(self.feed('vehicles'), 'moving', stop='b', sequence=20, status=pb.VehiclePosition.IN_TRANSIT_TO)

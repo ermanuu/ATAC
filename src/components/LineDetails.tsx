@@ -38,7 +38,7 @@ export function RouteDirections() {
       {!state.data.variants.length && <Notice text="Nessuna direzione in servizio ora o in partenza nei prossimi 90 minuti." />}
       {state.data.variants.map(variant => <GlassPressable accessibilityRole="button" accessibilityLabel={`Direzione ${variant.headsign}, da ${variant.fromName}`} key={variant.id}
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
-        <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text><Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
+        <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text>{variant.category && variant.category !== 'Ordinaria' && <Text style={s.small}>{variant.category}</Text>}<Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
       </GlassPressable>)}
       {inactiveVariants.length > 0 && <View style={s.inactiveSection}>
         <Text accessibilityRole="header" style={s.inactiveHeading}>Non attive</Text>

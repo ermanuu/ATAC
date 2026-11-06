@@ -9,7 +9,7 @@ import { layout, typography } from '../ui/design';
 
 type Timetable = {
   route: Route;
-  selectedVariant: { headsign: string; fromName: string };
+  selectedVariant: { headsign: string; fromName: string; category?: string; pathNote?: string };
   date: string;
   nightService?: boolean;
   departures: Departure[];
@@ -39,6 +39,7 @@ export function DailyDepartures() {
         <Badge name={data.route.name} /><View style={styles.details}>
           <Text style={[typography.label, { color: colors.text }]}>Da {data.selectedVariant.fromName}</Text>
           <Text style={[typography.caption, { color: colors.muted }]}>Verso {data.selectedVariant.headsign}</Text>
+          {data.selectedVariant.category && data.selectedVariant.category !== 'Ordinaria' && <Text style={[typography.caption, { color: colors.muted }]}>{data.selectedVariant.category}{data.selectedVariant.pathNote ? ` · ${data.selectedVariant.pathNote}` : ''}</Text>}
         </View>
       </View>
       <View style={styles.row}>
@@ -52,7 +53,7 @@ export function DailyDepartures() {
           <Text style={[styles.arrow, { color: colors.accent }]}>›</Text>
         </GlassPressable>
       </View>
-      {!data.departures.length && <Notice text="Nessuna partenza programmata per la giornata selezionata." />}
+      {!data.departures.length && <Notice text="Nessuna partenza programmata per questo percorso nella giornata selezionata." />}
       {sections.map((section, sectionIndex) => <View key={`${section.date}-${section.nightDate || ''}`} style={styles.day}>
         {section.nightDate && section.nightDate !== sections[sectionIndex-1]?.nightDate && <Text accessibilityRole="header" style={[typography.label, { color: colors.muted }]}>{nightDescription(section.nightDate)}</Text>}
         {section.date !== data.date && !night && <View style={styles.dayHeading}>
