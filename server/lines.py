@@ -26,13 +26,23 @@ def variant_id(direction, headsign, stop_ids):
 
 def patterns(db, route_id, now, horizon=DEPARTURE_WINDOW_SECONDS):
     windows = list(t.service_windows(db, now, horizon))
-    key = (db.generation, route_id, tuple((epoch, frozenset(active)) for epoch, active in windows))
-    groups, sequences = _patterns.get(key, lambda: load_patterns(db, route_id, windows), ttl=3600)
+    services = set().union(*(active for _, active in windows))
+    groups, sequences = cached_patterns(db, route_id, services)
     return groups, sequences, windows
 
 
-def load_patterns(db, route_id, windows):
-    services = set().union(*(active for _, active in windows))
+def cached_patterns(db, route_id, services):
+    key = (db.generation, route_id, frozenset(services))
+    return _patterns.get(key, lambda: load_patterns(db, route_id, services), ttl=3600)
+
+
+def catalogue_patterns(db, route_id):
+    services = {row['service_id'] for row in db.execute(
+        'SELECT DISTINCT service_id FROM trips WHERE route_id=?', (route_id,))}
+    return cached_patterns(db, route_id, services)
+
+
+def load_patterns(db, route_id, services):
     trips = {r['trip_id']: dict(r) for r in db.execute(
         'SELECT * FROM trips WHERE route_id=? ORDER BY trip_id', (route_id,)) if r['service_id'] in services}
     sequences = defaultdict(list)
@@ -63,6 +73,12 @@ def load_patterns(db, route_id, windows):
 
 def summary(group):
     return {k: v for k, v in group.items() if k not in ('stops', 'trips')}
+
+
+def timetable_key(group):
+    # Stop-by-stop variants may change by weekday; the terminus timetable
+    # includes every path serving this direction and the same two termini.
+    return (group['direction'], group['headsign'], group['stops'][0]['stop_id'], group['stops'][-1]['stop_id'])
 
 
 def terminal_departures(group, sequences, windows, now, live, start=None, end=None):
@@ -149,33 +165,49 @@ def order_terminal_vehicles(stops, departures, now):
     stops[0]['vehiclesAt'].sort(key=lambda v: v.get('departureTime', float('inf')))
 
 
-def daily_departures(route_id, variant, now=None, refresh=False):
-    """Departures occurring today in Rome, including the previous GTFS service day."""
-    use_current_clock = now is None
+def timetable_window(route, now, date=None):
+    """Use Rome operating days, with a separate overnight window for n-lines."""
+    night = route['name'].strip().lower().startswith('n')
+    local = datetime.fromtimestamp(now, t.ROME)
+    if date:
+        try:
+            day = datetime.strptime(date, '%Y-%m-%d').date()
+            if day.isoformat() != date:
+                raise ValueError()
+        except ValueError:
+            raise ValueError('Data non valida: usa il formato AAAA-MM-GG.') from None
+    else:
+        day = local.date()
+        if local.hour < (6 if night else 4) or (night and local.hour == 6 and local.minute == 0):
+            day -= timedelta(days=1)
+    start = int(datetime.combine(day, datetime.min.time().replace(hour=23 if night else 4), t.ROME).timestamp())
+    # Include the final 06:00 departure; the daytime window ends before 04:00.
+    end_time = datetime.min.time().replace(hour=6, minute=1) if night else datetime.min.time().replace(hour=4)
+    end = int(datetime.combine(day + timedelta(days=1), end_time, t.ROME).timestamp())
+    return day, start, end, night
+
+
+def daily_departures(route_id, variant, now=None, refresh=False, date=None):
+    """Timetable only: calendar exceptions and GTFS >24:00 times, without realtime."""
     now = int(time.time()) if now is None else now
-    day = datetime.fromtimestamp(now, t.ROME).date()
-    start = int(datetime.combine(day, datetime.min.time(), t.ROME).timestamp())
-    end = int(datetime.combine(day + timedelta(days=1), datetime.min.time(), t.ROME).timestamp())
     with t.connect() as db:
         route = db.execute('SELECT * FROM routes WHERE route_id=? AND type=3', (route_id,)).fetchone()
         if not route:
             raise ValueError('Linea autobus non trovata')
-        groups, sequences, windows = patterns(db, route_id, start, end-start-1)
+        day, start, end, night = timetable_window(route, now, date)
+        groups, sequences = catalogue_patterns(db, route_id)
         selected = next((g for g in groups if g['id'] == variant), None)
         if selected is None:
             raise ValueError('Direzione non disponibile: torna alla scelta della direzione')
-    vehicles = t.read_live('vehicles', refresh)
-    updates = t.read_live('updates', refresh)
-    if use_current_clock:
-        now = int(time.time())
-        if datetime.fromtimestamp(now, t.ROME).date() != day:
-            return daily_departures(route_id, variant, refresh=refresh)
-    stops, _ = place_vehicles(selected, groups, sequences, now, vehicles, updates, windows)
-    departures = terminal_departures(selected, sequences, windows, now, updates, start, end-1)
+        windows = list(t.service_windows(db, start, end-start-1))
+        key = timetable_key(selected)
+        trips = {trip_id: trip for group in groups if timetable_key(group) == key
+                 for trip_id, trip in group['trips'].items()}
+        departures = terminal_departures(selected | {'trips': trips}, sequences, windows, now,
+                                         {'available': False}, start, end-1)
     return {'route': dict(route), 'selectedVariant': summary(selected), 'date': day.isoformat(),
-            'window': {'from': start, 'to': end},
-            'departures': departure_positions(departures, stops),
-            'liveAvailable': updates['available'], 'timestamp': updates['timestamp']}
+            'window': {'from': start, 'to': end}, 'nightService': night,
+            'scheduleOnly': True, 'departures': departures}
 
 
 def stop_distance(lat, lon, stop):
@@ -354,6 +386,12 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
             epoch + sequences[trip_id][-1]['arrival'] >= now
             for epoch, active in windows for trip_id, trip in g['trips'].items())]
         result = {'route': dict(route), 'variants': [summary(g) for g in active_groups]}
+        if not variant:
+            catalogue, _ = catalogue_patterns(db, route_id)
+            choices = {}
+            for group in catalogue:
+                choices.setdefault(timetable_key(group), summary(group))
+            result['timetableVariants'] = list(choices.values())
     if not variant:
         # The direction picker needs no realtime requests, vehicle list or stop list.
         return result

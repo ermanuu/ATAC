@@ -17,13 +17,15 @@ const BUS_ICON = require('../../assets/bus-front.png');
 type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
 type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; tripId?: string; serviceDate?: string; departureTime?: number; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
 type Stop = { stop_id: string; name: string; sequence: number; vehiclesAt: Vehicle[]; vehiclesBefore: Vehicle[] };
-type Directions = { route: Route; variants: Variant[] };
+type Directions = { route: Route; variants: Variant[]; timetableVariants?: Variant[] };
 type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: Departure[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
 
 export function RouteDirections() {
   const { s } = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const state = useData<Directions>(id ? `routes/${encodeURIComponent(id)}` : null, 10000, true);
+  const inactiveVariants = state.data?.timetableVariants?.filter(v => !state.data?.variants.some(active =>
+    active.direction === v.direction && active.headsign === v.headsign && active.fromName === v.fromName && active.toName === v.toName)) || [];
   return <View style={s.stack}>
     <RequestState state={state} />
     {state.data && <>
@@ -34,6 +36,13 @@ export function RouteDirections() {
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
         <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text><Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
       </GlassPressable>)}
+      {inactiveVariants.length > 0 && <>
+        <Text style={s.heading}>Consulta gli orari</Text>
+        {inactiveVariants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}`} style={s.direction}
+          onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant: variant.id, fromDirections: '1' } })}>
+          <View style={s.flex}><Text style={s.directionName}>{variant.headsign}</Text><Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.link}>Orari programmati</Text></View><Text style={s.chevron}>›</Text>
+        </GlassPressable>)}
+      </>}
     </>}
   </View>;
 }

@@ -62,8 +62,9 @@ def prepare_api(path):
         build = lambda: transit.route_detail(parts[2], query('variant') or None, **options)
     elif len(parts) == 4 and parts[:2] == ['api', 'routes'] and parts[3] == 'departures':
         from .lines import daily_departures
-        key = ('departures', parts[2], query('variant'))
-        build = lambda: daily_departures(parts[2], query('variant'), **options)
+        key, live, ttl = ('departures', parts[2], query('variant'), query('date')), False, 60
+        schedule_options = options | ({'date': query('date')} if query('date') else {})
+        build = lambda: daily_departures(parts[2], query('variant'), **schedule_options)
     elif parts == ['api', 'stops']:
         key, live, ttl = ('stops', query('q')), False, 60
         build = lambda: transit.stops(query('q')) if len(query('q')) >= 2 else []

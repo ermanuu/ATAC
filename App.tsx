@@ -107,7 +107,7 @@ function AppShell() {
   const { width } = useWindowDimensions();
   const [logoReady, setLogoReady] = useState(false);
   const pathname = usePathname();
-  const params = useGlobalSearchParams<{ id?: string; variant?: string; stopId?: string; fromRouteId?: string; fromVariant?: string; fromLine?: string }>();
+  const params = useGlobalSearchParams<{ id?: string; variant?: string; stopId?: string; fromRouteId?: string; fromVariant?: string; fromLine?: string; fromDirections?: string }>();
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const home = pathname === '/';
   const lineDetail = pathname.startsWith('/line/');
@@ -123,7 +123,7 @@ function AppShell() {
     if (params.fromRouteId && params.fromVariant) router.replace({ pathname: '/line/[id]/[variant]', params: { id: params.fromRouteId, variant: params.fromVariant } });
     else router.replace('/stops');
   };
-  const returnFromDepartures = () => params.variant
+  const returnFromDepartures = () => params.variant && params.fromDirections !== '1'
     ? router.replace({ pathname: '/line/[id]/[variant]', params: { id: params.id!, variant: params.variant } })
     : router.replace({ pathname: '/line/[id]', params: { id: params.id! } });
   return <View style={s.safe}><GlassBackground /><SafeAreaView edges={['top', 'left', 'right']} style={s.safeContent}><StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />

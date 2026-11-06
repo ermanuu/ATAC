@@ -34,6 +34,25 @@ export function departureState(departure: Departure, now: number) {
   return departure.kind === 'live' ? 'live' : 'scheduled';
 }
 
+export function groupScheduledDeparturesByDay(departures: Departure[]) {
+  const days = new Map<string, Departure[]>();
+  const minutes = new Set<number>();
+  const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const scheduled = departures.filter(d => Number.isFinite(d.scheduledTime))
+    .map(d => ({ ...d, time: d.scheduledTime, kind: 'scheduled' })).sort((a, b) => a.time-b.time);
+  for (const departure of scheduled) {
+    const minute = Math.floor(departure.scheduledTime/60);
+    if (minutes.has(minute)) continue;
+    minutes.add(minute);
+    const parts = formatter.formatToParts(new Date(departure.time*1000));
+    const date = ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)!.value).join('-');
+    const group = days.get(date) || [];
+    group.push(departure);
+    days.set(date, group);
+  }
+  return [...days].map(([date, values]) => ({ date, hours: groupDeparturesByHour(values) }));
+}
+
 export function departureLabel(departure: Departure, now: number) {
   if (departureState(departure, now) === 'departed') return 'Partito';
   if (departure.kind === 'live') return 'LIVE';

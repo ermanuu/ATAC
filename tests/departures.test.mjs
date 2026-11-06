@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { departureLabel, departureState, groupDeparturesByHour, visibleDepartures } from '../src/lib/departures.ts';
+import { departureLabel, departureState, groupDeparturesByHour, groupScheduledDeparturesByDay, visibleDepartures } from '../src/lib/departures.ts';
 
 const now = 10000;
 const departure = { tripId: 'trip', serviceDate: '20261106', time: now, scheduledTime: now, kind: 'scheduled' };
@@ -34,6 +34,34 @@ test('Rome hours use daylight saving and preserve midnight as 00', () => {
   assert.deepEqual(groupDeparturesByHour([at('2026-07-01T17:10:00Z')]).map(g => g.hour), ['19']);
   assert.deepEqual(groupDeparturesByHour([at('2026-11-05T23:10:00Z')]).map(g => g.hour), ['00']);
   assert.deepEqual(groupDeparturesByHour([]), []);
+});
+
+test('the timetable uses only scheduled times and separates dates after midnight', () => {
+  const before = Date.parse('2026-11-06T23:50:00+01:00')/1000;
+  const after = Date.parse('2026-11-07T00:30:00+01:00')/1000;
+  const rows = [
+    { ...departure, kind: 'live', scheduledTime: after, time: after+4500 },
+    { ...departure, kind: 'live', scheduledTime: before, time: before+1200 },
+  ];
+  const groups = groupScheduledDeparturesByDay(rows);
+  assert.deepEqual(groups.map(g => g.date), ['2026-11-06', '2026-11-07']);
+  assert.deepEqual(groups.map(g => g.hours[0].hour), ['23', '00']);
+  assert.equal(groups[0].hours[0].departures[0].time, before);
+  assert.equal(rows[1].time, before+1200);
+  assert.equal(rows[1].kind, 'live');
+});
+
+test('live-only rows without a timetable time cannot become scheduled departures', () => {
+  assert.deepEqual(groupScheduledDeparturesByDay([{...departure, scheduledTime: undefined}]), []);
+});
+
+test('overlapping GTFS service dates do not repeat the same scheduled minute', () => {
+  const time = Date.parse('2026-11-07T01:35:00+01:00')/1000;
+  const groups = groupScheduledDeparturesByDay([
+    {...departure, tripId:'night-from-friday', serviceDate:'20261106', scheduledTime:time},
+    {...departure, tripId:'early-saturday', serviceDate:'20261107', scheduledTime:time},
+  ]);
+  assert.equal(groups[0].hours[0].departures.length, 1);
 });
 
 test('past times and buses already beyond the origin are marked departed', () => {

@@ -289,30 +289,33 @@ class LineTests(unittest.TestCase):
         self.assertEqual([d['tripId'] for d in result['departures']], ['morning', 't1', 'evening'])
         self.assertEqual(result['date'], '2026-10-30')
 
-    def test_daily_departures_start_at_midnight_and_exclude_next_midnight(self):
+    def test_day_timetable_runs_from_0400_through_0359_next_day(self):
         with sqlite3.connect(t.DB) as db:
             db.execute("INSERT INTO exceptions VALUES ('daily','20261029',2)")
-        self.add_trip('midnight', 0)
-        self.add_trip('last', 24*3600-1)
-        self.add_trip('next-day', 24*3600)
+        self.add_trip('too-early', 4*3600-1)
+        self.add_trip('start', 4*3600)
+        self.add_trip('midnight', 24*3600)
+        self.add_trip('last', 28*3600-1)
+        self.add_trip('too-late', 28*3600)
         result = daily_departures('r1', self.variant(), self.now)
-        self.assertEqual([d['tripId'] for d in result['departures']], ['midnight', 't1', 'last'])
+        self.assertEqual([d['tripId'] for d in result['departures']], ['start', 't1', 'midnight', 'last'])
         self.assertEqual(result['window']['to']-result['window']['from'], 86400)
+        self.assertEqual(datetime.fromtimestamp(result['window']['from'], t.ROME).hour, 4)
 
     def test_daily_departures_include_previous_service_day_after_24_hours(self):
         self.now = int(datetime(2026,10,31,0,59,tzinfo=t.ROME).timestamp())
         result = daily_departures('r1', self.variant('Notturno'), self.now)
-        self.assertEqual(result['date'], '2026-10-31')
+        self.assertEqual(result['date'], '2026-10-30')
         self.assertEqual([d['tripId'] for d in result['departures']], ['night'])
         self.assertEqual(result['departures'][0]['serviceDate'], '20261030')
 
-    def test_daily_departure_window_uses_rome_calendar_day_on_dst_change(self):
-        self.now = int(datetime(2026,10,25,10,0,tzinfo=t.ROME).timestamp())
+    def test_operating_day_uses_rome_wall_clock_across_dst_change(self):
+        self.now = int(datetime(2026,10,24,10,0,tzinfo=t.ROME).timestamp())
         result = daily_departures('r1', self.variant(), self.now)
         self.assertEqual(result['window']['to']-result['window']['from'], 25*3600)
         self.assertTrue(all(result['window']['from'] <= d['time'] < result['window']['to'] for d in result['departures']))
 
-    def test_daily_departures_apply_live_departure_and_cancellation(self):
+    def test_timetable_ignores_live_delay_and_live_cancellation_without_fetching_feeds(self):
         f = self.feed('updates')
         self.add_trip('canceled', 11*3600)
         u = f.entity.add(); u.id = 'updated'; u.trip_update.trip.trip_id = 't1'
@@ -320,19 +323,78 @@ class LineTests(unittest.TestCase):
         u = f.entity.add(); u.id = 'canceled'; u.trip_update.trip.trip_id = 'canceled'
         u.trip_update.trip.schedule_relationship = pb.TripDescriptor.CANCELED
         result = daily_departures('r1', self.variant(), self.now, refresh=True)
-        self.assertEqual([d['tripId'] for d in result['departures']], ['t1'])
-        self.assertEqual(result['departures'][0]['time'], self.now+120)
-        self.assertEqual(result['departures'][0]['kind'], 'live')
-        self.assertEqual(self.read.call_args_list[-1].kwargs, {'force': True})
+        self.assertEqual([d['tripId'] for d in result['departures']], ['t1', 'canceled'])
+        self.assertEqual(result['departures'][0]['time'], self.now)
+        self.assertTrue(all(d['kind'] == 'scheduled' for d in result['departures']))
+        self.assertNotIn('timestamp', result)
+        self.read.assert_not_called()
 
     def test_parked_bus_is_identified_even_after_scheduled_departure(self):
         self.add_trip('late-parked', 35940)
         self.vehicle(self.feed('vehicles'), 'parked', trip='late-parked', stop='a', sequence=10)
-        for result in (self.board(), daily_departures('r1', self.variant(), self.now)):
-            item = next(d for d in result['departures'] if d['tripId'] == 'late-parked')
-            self.assertTrue(item['atTerminus'])
-            self.assertFalse(item['departed'])
-            self.assertEqual(item['positionTimestamp'], self.now)
+        item = next(d for d in self.board()['departures'] if d['tripId'] == 'late-parked')
+        self.assertTrue(item['atTerminus'])
+        self.assertFalse(item['departed'])
+        self.assertEqual(item['positionTimestamp'], self.now)
+        timetable = daily_departures('r1', self.variant(), self.now)
+        self.assertTrue(all('atTerminus' not in d and 'departed' not in d for d in timetable['departures']))
+
+    def test_timetable_includes_after_midnight_times_in_both_gtfs_encodings(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("DELETE FROM exceptions WHERE date='20261031'")
+        self.add_trip('zero-hour', 30*60)
+        self.add_trip('over24', 24*3600+45*60)
+        result = daily_departures('r1', self.variant(), self.now)
+        self.assertEqual([d['tripId'] for d in result['departures']], ['t1', 'zero-hour', 'over24'])
+        self.assertEqual([d['serviceDate'] for d in result['departures']], ['20261030', '20261031', '20261030'])
+
+    def test_night_timetable_includes_2300_through_0600(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE routes SET name='nMB' WHERE route_id='r1'")
+        for trip, departure in [('too-early',23*3600-1),('start',23*3600),('last',30*3600),('too-late',30*3600+60)]:
+            self.add_trip(trip, departure)
+        selected = self.variant()
+        result = daily_departures('r1', selected, self.now)
+        self.assertTrue(result['nightService'])
+        self.assertEqual([d['tripId'] for d in result['departures']], ['start', 'last'])
+        self.now = int(datetime(2026,10,31,3,0,tzinfo=t.ROME).timestamp())
+        self.assertEqual(daily_departures('r1', selected, self.now)['date'], '2026-10-30')
+        self.now = int(datetime(2026,10,31,6,1,tzinfo=t.ROME).timestamp())
+        self.assertEqual(daily_departures('r1', selected, self.now)['date'], '2026-10-31')
+
+    def test_inactive_line_keeps_timetable_directions_available(self):
+        self.now = int(datetime(2026,10,30,15,0,tzinfo=t.ROME).timestamp())
+        result = t.route_detail('r1', now=self.now)
+        self.assertEqual(result['variants'], [])
+        choices = {v['headsign']:v['id'] for v in result['timetableVariants']}
+        self.assertEqual(set(choices), {'Cambio', 'Notturno'})
+        timetable = daily_departures('r1', choices['Cambio'], self.now)
+        self.assertEqual([d['tripId'] for d in timetable['departures']], ['t1'])
+        self.read.assert_not_called()
+
+    def test_explicit_timetable_date_can_find_service_on_another_day(self):
+        selected = self.variant()
+        off = daily_departures('r1', selected, self.now, date='2026-10-31')
+        on = daily_departures('r1', selected, self.now, date='2026-11-01')
+        self.assertEqual(off['departures'], [])
+        self.assertEqual([d['tripId'] for d in on['departures']], ['t1'])
+        self.assertEqual(on['departures'][0]['serviceDate'], '20261101')
+        for invalid in ('2026-10-32', '2026-1-2', 'not-a-date'):
+            with self.assertRaisesRegex(ValueError, 'Data non valida'):
+                daily_departures('r1', selected, self.now, date=invalid)
+
+    def test_timetable_includes_weekday_variants_with_the_same_direction_and_termini(self):
+        self.add_trip('weekend-path', 11*3600, stops=('a','c','b'))
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE trips SET service_id='weekend' WHERE trip_id='weekend-path'")
+            db.execute("INSERT INTO calendar VALUES ('weekend','20260101','20261231','0000011')")
+        selected = self.variant()
+        friday = daily_departures('r1', selected, self.now, date='2026-10-30')
+        saturday = daily_departures('r1', selected, self.now, date='2026-10-31')
+        self.assertEqual([d['tripId'] for d in friday['departures']], ['t1'])
+        self.assertEqual([d['tripId'] for d in saturday['departures']], ['weekend-path'])
+        choices = t.route_detail('r1', now=self.now)['timetableVariants']
+        self.assertEqual(len([v for v in choices if v['headsign']=='Cambio']), 1)
 
     def test_bus_beyond_origin_is_marked_departed_and_retained_positions_are_ignored(self):
         self.vehicle(self.feed('vehicles'), 'moving', stop='b', sequence=20, status=pb.VehiclePosition.IN_TRANSIT_TO)

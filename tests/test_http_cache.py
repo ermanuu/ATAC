@@ -55,6 +55,15 @@ class HttpCacheTests(unittest.TestCase):
             self.assertEqual(value.result, {'departures': []})
             calculate.assert_called_once_with('706', 'direction', refresh=True)
 
+    def test_timetable_cache_is_static_but_distinguishes_selected_dates(self):
+        with patch('server.lines.daily_departures', return_value={'departures': []}) as calculate:
+            first = app.api_response('/api/routes/170/departures?variant=a&date=2026-11-06')
+            t.realtime.revision += 1
+            self.assertIs(app.api_response('/api/routes/170/departures?date=2026-11-06&variant=a'), first)
+            app.api_response('/api/routes/170/departures?variant=a&date=2026-11-07')
+            self.assertEqual(calculate.call_count, 2)
+            calculate.assert_called_with('170', 'a', date='2026-11-07')
+
     def test_replacing_the_dataset_invalidates_cached_searches(self):
         t.DB.write_bytes(b'first')
         with patch.object(t, 'routes', return_value=['old']) as calculate:
