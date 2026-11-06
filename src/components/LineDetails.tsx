@@ -15,7 +15,7 @@ import { DepartureTile } from './DepartureTile';
 const BUS_ICON = require('../../assets/bus-front.png');
 
 type Variant = { id: string; headsign: string; direction: string; fromName: string; toName: string; stopCount: number };
-type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; tripId?: string; serviceDate?: string; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
+type Vehicle = { id: string; vehicleId?: string | null; timestamp: number; status: string; tripId?: string; serviceDate?: string; departureTime?: number; estimated: boolean; retained?: boolean; timestampSource?: string; positionSource?: string; predictionTimestamp?: number | null; lat: number | null; lon: number | null };
 type Stop = { stop_id: string; name: string; sequence: number; vehiclesAt: Vehicle[]; vehiclesBefore: Vehicle[] };
 type Directions = { route: Route; variants: Variant[] };
 type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: Departure[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
@@ -29,7 +29,7 @@ export function RouteDirections() {
     {state.data && <>
       <View style={s.row}><Badge name={state.data.route.name} /><Text accessibilityRole="header" style={s.title}>Scegli la direzione</Text></View>
       <Text style={s.muted}>Verso quale capolinea vuoi andare?</Text>
-      {!state.data.variants.length && <Notice text="Nessuna direzione in servizio ora o in partenza nella prossima ora." />}
+      {!state.data.variants.length && <Notice text="Nessuna direzione in servizio ora o in partenza nei prossimi 90 minuti." />}
       {state.data.variants.map(variant => <GlassPressable accessibilityRole="button" accessibilityLabel={`Direzione ${variant.headsign}, da ${variant.fromName}`} key={variant.id}
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
         <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text><Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
@@ -70,6 +70,8 @@ export function RouteTimeline() {
   })) || [];
   const vehicles = visibleStops.flatMap(stop => [...stop.vehiclesAt, ...stop.vehiclesBefore]);
   const selected = vehicles.find(v => v.id === vehicleInfo?.id);
+  const matchingDepartures = selected ? departures.filter(d => d.tripId === selected.tripId && (!selected.serviceDate || d.serviceDate === selected.serviceDate)) : [];
+  const selectedDeparture = selected?.departureTime ?? (matchingDepartures.length === 1 ? matchingDepartures[0].time : null);
   const vehicleCount = vehicles.length;
   return <View style={s.stack}>
     <RequestState state={state} showLoading={!data} />
@@ -79,7 +81,7 @@ export function RouteTimeline() {
         <View style={s.departureHeader}><Text numberOfLines={1} style={s.departureLabel}>Partenze da {data.selectedVariant.fromName}</Text><Text style={s.departureLink}>Tutte ›</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.departureScroller} contentContainerStyle={s.departureTrack}>
           {departures.map(departure => <DepartureTile key={`${departure.tripId}-${departure.serviceDate}`} departure={departure} now={now} />)}
-          {!departures.length && <Text style={s.small}>Nessuna partenza tra −5 e +60 minuti</Text>}
+          {!departures.length && <Text style={s.small}>Nessuna partenza tra −5 e +90 minuti</Text>}
         </ScrollView>
       </GlassPressable>
       <UpdateStatus timestamp={data.timestamp} message={!data.liveAvailable || state.error ? 'Posizioni live non disponibili' : undefined} />
@@ -107,7 +109,7 @@ export function RouteTimeline() {
         <View style={s.row}><Text style={[s.heading, s.flex]}>Vettura {selected.vehicleId || 'non disponibile'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Chiudi dettagli autobus" onPress={() => setVehicleInfo(null)}><Text style={s.close}>×</Text></Pressable></View>
         <Text style={s.muted}>{selected.retained ? 'Ultima posizione nota vicino a' : selected.status === 'STOPPED_AT' && (i === 0 || i === data.stops.length - 1) && stop.vehiclesAt.some(v => v.id === selected.id) ? 'Al capolinea' : selected.positionSource === 'predictions' ? 'Prossima fermata da previsioni live:' : selected.estimated ? 'Posizione approssimata vicino a' : selected.status === 'STOPPED_AT' ? 'Alla fermata' : 'In arrivo a'} {stop.name}</Text>
         <Text style={s.small}>{selected.timestampSource === 'feed' ? 'Timestamp del feed · ' : 'Rilevazione veicolo · '}{positionStamp(selected.timestamp).replace('Posizioni alle ', '')}</Text>
-        {i === 0 && selected.status === 'STOPPED_AT' && departures.filter(d => d.tripId === selected.tripId && (!selected.serviceDate || d.serviceDate === selected.serviceDate)).length === 1 && <Text style={s.expectedTime}>Partenza prevista: {clock(departures.find(d => d.tripId === selected.tripId && (!selected.serviceDate || d.serviceDate === selected.serviceDate))!.time)}</Text>}
+        {i === 0 && selected.status === 'STOPPED_AT' && selectedDeparture != null && <Text style={s.expectedTime}>Partenza prevista: {clock(selectedDeparture)}</Text>}
       </GlassSurface>}
           </View>;
         })}
@@ -125,10 +127,10 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   heading: { ...typography.heading, color: colors.text, flexShrink: 1 }, muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted },
   kicker: { ...typography.micro, color: colors.accent, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
   direction: { flexDirection: 'row', alignItems: 'center', padding: layout.cardPadding, borderRadius: layout.radius, gap: 12 }, directionName: { ...typography.heading, color: colors.text, marginBottom: 8 }, chevron: { color: colors.accent, fontSize: 28 },
-  departureStrip: { gap: 12, borderRadius: layout.radius, padding: layout.cardPadding },
+  departureStrip: { gap: 8, borderRadius: layout.radius, padding: 12 },
   departureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   departureLabel: { ...typography.caption, flex: 1, color: colors.muted, fontWeight: '600' }, departureLink: { ...typography.caption, color: colors.accent, fontWeight: '700' },
-  departureScroller: { minHeight: 80, flexGrow: 0 }, departureTrack: { alignItems: 'center', gap: 10 },
+  departureScroller: { minHeight: 60, flexGrow: 0 }, departureTrack: { alignItems: 'center', gap: 8 },
   expectedTime: { color: colors.live, backgroundColor: colors.liveSoft, padding: 8, borderRadius: 8, fontSize: 15, fontWeight: '700' },
   timeline: { borderRadius: layout.radius, paddingVertical: layout.cardPadding, paddingRight: layout.cardPadding, overflow: 'hidden' }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
   vehicleLane: { width: 64, justifyContent: 'center', alignItems: 'center' }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: colors.rail, minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.rail }, lastStop: { backgroundColor: colors.accent, borderColor: colors.accent, borderRadius: 2 },

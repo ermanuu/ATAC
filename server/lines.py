@@ -16,6 +16,7 @@ from .cache import SharedCache
 # Large lines cannot make the static cache grow without a bound.
 _patterns = SharedCache(max_entries=128, max_weight=int(os.getenv('PATTERN_CACHE_ROWS', '200000')),
                         weight=lambda value: sum(map(len, value[1].values())))
+DEPARTURE_WINDOW_SECONDS = 90 * 60
 
 
 def variant_id(direction, headsign, stop_ids):
@@ -23,7 +24,7 @@ def variant_id(direction, headsign, stop_ids):
     return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
-def patterns(db, route_id, now, horizon=3600):
+def patterns(db, route_id, now, horizon=DEPARTURE_WINDOW_SECONDS):
     windows = list(t.service_windows(db, now, horizon))
     key = (db.generation, route_id, tuple((epoch, frozenset(active)) for epoch, active in windows))
     groups, sequences = _patterns.get(key, lambda: load_patterns(db, route_id, windows), ttl=3600)
@@ -66,7 +67,7 @@ def summary(group):
 
 def terminal_departures(group, sequences, windows, now, live, start=None, end=None):
     start = now - 300 if start is None else start
-    end = now + 3600 if end is None else end
+    end = now + DEPARTURE_WINDOW_SECONDS if end is None else end
     updates = {}
     if live['available']:
         for entity in live['feed'].entity:
@@ -129,6 +130,23 @@ def departure_positions(departures, stops):
             departure['departed'] = all(index > 0 for index, _ in matching)
             departure['positionTimestamp'] = min(vehicle['timestamp'] for _, vehicle in matching)
     return departures
+
+
+def order_terminal_vehicles(stops, departures, now):
+    """Order origin icons by the trip's departure, also for retained positions."""
+    by_trip = defaultdict(list)
+    for departure in departures:
+        by_trip[departure['tripId']].append(departure)
+    for vehicle in stops[0]['vehiclesAt']:
+        vehicle.pop('departureTime', None)
+        vehicle.pop('departureKind', None)
+        candidates = [d for d in by_trip[vehicle['tripId']]
+                      if not vehicle['serviceDate'] or d['serviceDate'] == vehicle['serviceDate']]
+        if candidates:
+            departure = min(candidates, key=lambda d: abs(d['scheduledTime']-now))
+            vehicle.update(departureTime=departure['time'], departureKind=departure['kind'])
+    # Unknown trip assignments keep their original relative order, after timed buses.
+    stops[0]['vehiclesAt'].sort(key=lambda v: v.get('departureTime', float('inf')))
 
 
 def daily_departures(route_id, variant, now=None, refresh=False):
@@ -331,7 +349,7 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
         groups, sequences, windows = patterns(db, route_id, now)
         active_groups = [g for g in groups if any(
             trip['service_id'] in active and
-            epoch + sequences[trip_id][0]['departure'] <= now + 3600 and
+            epoch + sequences[trip_id][0]['departure'] <= now + DEPARTURE_WINDOW_SECONDS and
             epoch + sequences[trip_id][-1]['arrival'] >= now
             for epoch, active in windows for trip_id, trip in g['trips'].items())]
         result = {'route': dict(route), 'variants': [summary(g) for g in active_groups]}
@@ -347,9 +365,12 @@ def line_detail(route_id, variant=None, now=None, refresh=False):
         # Fetching may take seconds: evaluate freshness after the feed arrives.
         now = int(time.time())
     positioned_stops, unplaced = place_vehicles(selected, groups, sequences, now, vehicles, updates, windows)
+    all_departures = terminal_departures(selected, sequences, windows, now, updates, float('-inf'), float('inf'))
+    order_terminal_vehicles(positioned_stops, all_departures, now)
+    departures = [d for d in all_departures if now-300 <= d['time'] <= now+DEPARTURE_WINDOW_SECONDS]
     result.update(selectedVariant=summary(selected), stops=positioned_stops,
-                  departures=departure_positions(terminal_departures(selected, sequences, windows, now, updates), positioned_stops),
-                  window={'from': now - 300, 'to': now + 3600},
+                  departures=departure_positions(departures, positioned_stops),
+                  window={'from': now - 300, 'to': now + DEPARTURE_WINDOW_SECONDS},
                   liveAvailable=vehicles['available'], timestamp=vehicles['timestamp'],
                   departureLiveAvailable=updates['available'], departureTimestamp=updates['timestamp'],
                   unplacedVehicleCount=unplaced)

@@ -169,7 +169,7 @@ export function Home() {
     <View style={s.homeHeader}>
       <Image source={ROMABUS_LOGO} resizeMode="contain" accessibilityLabel="Logo ROMABUS" style={[s.homeLogo, { tintColor: colors.accent }]} />
       <Text style={s.eyebrow}>ROMABUS</Text>
-      <Text style={[s.livePill, { color: live ? colors.live : colors.muted }]}>{live ? '● Feed live' : state.loading ? 'Verifica live…' : '● Live non disponibile'}</Text>
+      <Text style={[s.livePill, { color: live ? colors.live : colors.muted }]}>{live ? '● Feed LIVE' : state.loading ? 'Verifica live…' : '● LIVE non disponibile'}</Text>
       <Text style={s.homeTitle}>La città, in movimento.</Text>
       <Text style={s.homeSubtitle}>Linee, fermate e percorsi a Roma</Text>
     </View>
@@ -313,7 +313,7 @@ export function Stops() {
             <View style={s.arrivalBadge}><Badge name={a.line} /></View>
             <View style={s.arrivalDetails}>
               <Text numberOfLines={2} style={[s.body, s.arrivalDestination]}>{a.headsign || 'Autobus'}</Text>
-              <Text numberOfLines={1} style={[s.small, s.arrivalStatus, a.kind === 'live' && { color: colors.live }]}>{a.kind === 'live' ? '● Live' : 'Orario programmato'}{a.atTerminus ? ' · al capolinea' : ''}</Text>
+              <Text numberOfLines={1} style={[s.small, s.arrivalStatus, a.kind === 'live' && { color: colors.live }]}>{a.kind === 'live' ? '● LIVE' : 'Orario programmato'}{a.atTerminus ? ' · al capolinea' : ''}</Text>
               <Text numberOfLines={1} style={s.vehicleNumber}>Vettura {a.vehicleId || 'non disponibile'}</Text>
             </View>
             <View style={s.arrivalTiming}>

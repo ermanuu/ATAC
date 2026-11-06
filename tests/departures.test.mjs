@@ -1,13 +1,37 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { departureState, visibleDepartures } from '../src/lib/departures.ts';
+import { departureLabel, departureState, groupDeparturesByHour, visibleDepartures } from '../src/lib/departures.ts';
 
 const now = 10000;
 const departure = { tripId: 'trip', serviceDate: '20261106', time: now, scheduledTime: now, kind: 'scheduled' };
 
-test('the strip includes exactly minus five minutes to plus one hour', () => {
-  const times = [now-301, now-300, now-1, now, now+3600, now+3601];
-  assert.deepEqual(visibleDepartures(times.map(time => ({ ...departure, time })), now).map(d => d.time), times.slice(1, 5));
+test('the strip includes exactly minus five minutes to plus ninety minutes', () => {
+  const times = [now-301, now-300, now-1, now, now+3600, now+3601, now+5400, now+5401];
+  assert.deepEqual(visibleDepartures(times.map(time => ({ ...departure, time })), now).map(d => d.time), times.slice(1, 7));
+});
+
+test('live departures always say LIVE, including parked buses and past forecasts', () => {
+  assert.equal(departureLabel({ ...departure, kind: 'live', atTerminus: true, positionTimestamp: now }, now), 'LIVE');
+  assert.equal(departureLabel({ ...departure, kind: 'live', time: now-60, departed: true, positionTimestamp: now }, now), 'LIVE');
+  assert.equal(departureLabel({ ...departure, time: now-60 }, now), 'Partito');
+  assert.equal(departureLabel({ ...departure, atTerminus: true, positionTimestamp: now }, now), 'Program.');
+});
+
+test('daily departures share one chronological row per Rome hour without mutating input', () => {
+  const at = iso => ({ ...departure, time: Date.parse(iso)/1000 });
+  const input = [at('2026-11-06T19:00:00Z'), at('2026-11-06T18:40:00Z'), at('2026-11-06T18:05:00Z')];
+  const original = [...input];
+  const groups = groupDeparturesByHour(input);
+  assert.deepEqual(groups.map(g => g.hour), ['19', '20']);
+  assert.deepEqual(groups[0].departures, [input[2], input[1]]);
+  assert.deepEqual(input, original);
+});
+
+test('Rome hours use daylight saving and preserve midnight as 00', () => {
+  const at = iso => ({ ...departure, time: Date.parse(iso)/1000 });
+  assert.deepEqual(groupDeparturesByHour([at('2026-07-01T17:10:00Z')]).map(g => g.hour), ['19']);
+  assert.deepEqual(groupDeparturesByHour([at('2026-11-05T23:10:00Z')]).map(g => g.hour), ['00']);
+  assert.deepEqual(groupDeparturesByHour([]), []);
 });
 
 test('past times and buses already beyond the origin are marked departed', () => {

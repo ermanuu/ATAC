@@ -187,11 +187,11 @@ class LineTests(unittest.TestCase):
         self.assertEqual(self.read.call_args_list[-1].kwargs, {'force':True})
 
     def test_departure_window_includes_exact_bounds(self):
-        for name, at in [('too_early', 35699), ('start',35700), ('recent',35940), ('end',39600), ('too_late',39601)]:
+        for name, at in [('too_early', 35699), ('start',35700), ('recent',35940), ('end',41400), ('too_late',41401)]:
             self.add_trip(name, at)
         result = self.board()
         self.assertEqual([d['tripId'] for d in result['departures']], ['start','recent','t1','end'])
-        self.assertEqual(result['window'], {'from': self.now-300, 'to': self.now+3600})
+        self.assertEqual(result['window'], {'from': self.now-300, 'to': self.now+5400})
         self.assertTrue(all(d['kind'] == 'scheduled' for d in result['departures']))
 
     def test_same_headsign_different_pattern_gets_separate_choice(self):
@@ -241,8 +241,45 @@ class LineTests(unittest.TestCase):
         e=f.entity.add(); e.id='late'; e.trip_update.trip.trip_id='late'
         event=e.trip_update.stop_time_update.add(); event.stop_sequence=10; event.departure.delay=120
         self.assertIn('late', [d['tripId'] for d in self.board()['departures']])
-        event.departure.time=self.now+3601
+        event.departure.time=self.now+5401
         self.assertNotIn('late', [d['tripId'] for d in self.board()['departures']])
+
+    def test_origin_icons_are_ordered_by_departure_instead_of_feed_order(self):
+        self.add_trip('later', 37200)
+        f = self.feed('vehicles')
+        self.vehicle(f, 'later-bus', trip='later', stop='a', sequence=10)
+        self.vehicle(f, 'first-bus', trip='t1', stop='a', sequence=10, timestamp=self.now-100)
+        buses = self.board()['stops'][0]['vehiclesAt']
+        self.assertEqual([v['id'] for v in buses], ['first-bus', 'later-bus'])
+        self.assertTrue(buses[0]['retained'])
+        self.assertEqual([v['departureTime'] for v in buses], [self.now, self.now+1200])
+
+    def test_origin_icons_follow_live_departure_changes_and_fall_back_to_schedule(self):
+        self.add_trip('later', 37200)
+        f = self.feed('vehicles')
+        self.vehicle(f, 'first-bus', trip='t1', stop='a', sequence=10)
+        self.vehicle(f, 'later-bus', trip='later', stop='a', sequence=10)
+        u = self.feed('updates').entity.add(); u.id = 'delay'
+        u.trip_update.trip.trip_id = 't1'; u.trip_update.timestamp = self.now
+        event = u.trip_update.stop_time_update.add(); event.stop_id = 'a'; event.departure.time = self.now+1500
+        buses = self.board()['stops'][0]['vehiclesAt']
+        self.assertEqual([v['id'] for v in buses], ['later-bus', 'first-bus'])
+        self.assertEqual(buses[1]['departureKind'], 'live')
+        u.trip_update.timestamp = self.now-181
+        buses = self.board()['stops'][0]['vehiclesAt']
+        self.assertEqual([v['id'] for v in buses], ['first-bus', 'later-bus'])
+        self.assertEqual(buses[0]['departureKind'], 'scheduled')
+
+    def test_late_parked_bus_is_sorted_even_if_its_departure_is_outside_the_strip(self):
+        self.add_trip('late-parked', 35400)
+        f = self.feed('vehicles')
+        self.vehicle(f, 'on-time', trip='t1', stop='a', sequence=10)
+        self.vehicle(f, 'overdue', trip='late-parked', stop='a', sequence=10)
+        result = self.board()
+        self.assertNotIn('late-parked', [d['tripId'] for d in result['departures']])
+        buses = result['stops'][0]['vehiclesAt']
+        self.assertEqual([v['id'] for v in buses], ['overdue', 'on-time'])
+        self.assertEqual(buses[0]['departureTime'], self.now-600)
 
     def test_daily_departures_include_finished_and_later_trips_in_the_selected_pattern(self):
         self.add_trip('morning', 6*3600)
