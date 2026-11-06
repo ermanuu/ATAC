@@ -32,5 +32,5 @@ export function LiveIndicator() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  dot: { width: 6, height: 6, borderRadius: 3 }, label: typography.micro,
+  dot: { width: 6, height: 6, borderRadius: 3 }, label: typography.caption,
 });

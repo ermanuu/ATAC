@@ -42,13 +42,10 @@ export function RouteDirections() {
       </GlassPressable>)}
       {inactiveVariants.length > 0 && <View style={s.inactiveSection}>
         <Text accessibilityRole="header" style={s.inactiveHeading}>Non attive</Text>
-        {[...groups].map(([category, variants]) => <View key={category} style={s.inactiveGroup}>
-          <Text accessibilityRole="header" style={s.inactiveCategory}>{category}</Text>
-          {variants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}, ${category}`} style={s.inactiveDirection}
+        {[...groups].flatMap(([category, variants]) => variants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}, ${category}`} style={s.inactiveDirection}
             onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant: variant.id, fromDirections: '1' } })}>
-            <View style={s.flex}><Text style={s.inactiveName}>{variant.headsign}</Text><Text style={s.small}>Da {variant.fromName}</Text></View><Text style={s.inactiveArrow}>›</Text>
-          </GlassPressable>)}
-        </View>)}
+            <View style={[s.flex, s.inactiveDetails]}><Text style={s.inactiveName}>{variant.headsign}</Text><Text style={s.inactiveCategory}>{category}</Text><Text style={s.small}>Da {variant.fromName}</Text></View><Text style={s.inactiveArrow}>›</Text>
+          </GlassPressable>))}
       </View>}
     </>}
   </View>;
@@ -141,7 +138,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   flex: { flex: 1 }, stack: { gap: layout.gap }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   directionPage: { flexGrow: 1 },
   inactiveSection: { marginTop: 'auto', paddingTop: 28, gap: 12 }, inactiveHeading: { ...typography.body, color: colors.muted, fontWeight: '700' },
-  inactiveGroup: { gap: 8 }, inactiveCategory: { ...typography.caption, color: colors.muted, fontWeight: '600' },
+  inactiveDetails: { gap: 2 }, inactiveCategory: { ...typography.caption, color: colors.muted, fontWeight: '600' },
   inactiveDirection: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, backgroundColor: colors.surfaceAlt, minHeight: 64 },
   inactiveName: { ...typography.body, color: colors.muted, fontWeight: '600' }, inactiveArrow: { fontSize: 22, color: colors.muted },
   title: { ...typography.title, color: colors.text, flexShrink: 1 },
@@ -151,7 +148,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   departureStrip: { gap: 8, borderRadius: layout.radius, padding: 12 },
   departureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   departureLabel: { ...typography.caption, flex: 1, color: colors.muted, fontWeight: '600' }, departureLink: { ...typography.caption, color: colors.accent, fontWeight: '700' },
-  departureScroller: { minHeight: 60, flexGrow: 0 }, departureTrack: { alignItems: 'center', gap: 8 },
+  departureScroller: { minHeight: 52, flexGrow: 0 }, departureTrack: { alignItems: 'center', gap: 20 },
   expectedTime: { color: colors.live, backgroundColor: colors.liveSoft, padding: 8, borderRadius: 8, fontSize: 15, fontWeight: '700' },
   timeline: { borderRadius: layout.radius, paddingVertical: layout.cardPadding, paddingRight: layout.cardPadding, overflow: 'hidden' }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
   vehicleLane: { width: 64, justifyContent: 'center', alignItems: 'center' }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: colors.rail, minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.rail }, lastStop: { backgroundColor: colors.accent, borderColor: colors.accent, borderRadius: 2 },

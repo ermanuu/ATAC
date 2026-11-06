@@ -55,9 +55,9 @@ export function DailyDepartures() {
       {!data.departures.length && <Notice text="Nessuna partenza programmata per la giornata selezionata." />}
       {sections.map((section, sectionIndex) => <View key={`${section.date}-${section.nightDate || ''}`} style={styles.day}>
         {section.nightDate && section.nightDate !== sections[sectionIndex-1]?.nightDate && <Text accessibilityRole="header" style={[typography.label, { color: colors.muted }]}>{nightDescription(section.nightDate)}</Text>}
-        {section.date !== data.date && <View style={styles.dayHeading}>
+        {section.date !== data.date && !night && <View style={styles.dayHeading}>
           <Text accessibilityRole="header" style={[typography.heading, { color: colors.text }]}>Dopo mezzanotte</Text>
-          <Text style={[typography.caption, { color: colors.muted }]}>{dateLabel(section.date)} · giorno successivo</Text>
+          <Text style={[typography.caption, { color: colors.muted }]}>{dateLabel(section.date)}</Text>
         </View>}
         <GlassSurface style={styles.timetable}>
           <View style={[styles.hourRow, styles.tableHeader, { borderColor: colors.border }]}>
