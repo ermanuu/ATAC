@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "ATAC",
-    "slug": "ATAC",
+    "name": "ROMABUS",
+    "slug": "romabus",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/atac-app-icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false
     },
@@ -22,6 +22,9 @@
       "output": "single"
     },
     "scheme": "romabus",
+    "extra": {
+      "copyright": "© 2026 ROMABUS"
+    },
     "plugins": [
       "expo-router",
       "expo-status-bar",
@@ -31,7 +34,10 @@
           "image": "./assets/bus-front.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#f7f8fa",
+          "dark": {
+            "backgroundColor": "#090f1c"
+          }
         }
       ],
       "expo-image"

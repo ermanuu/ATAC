@@ -1,5 +1,5 @@
 [Unit]
-Description=Aggiornamento orari GTFS Roma Autobus
+Description=Aggiornamento orari GTFS ROMABUS
 Wants=network-online.target
 After=network-online.target
 

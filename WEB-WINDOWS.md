@@ -1,4 +1,4 @@
-# Roma Autobus sul Wi-Fi di casa
+# ROMABUS sul Wi-Fi di casa
 
 Questa versione usa Safari: non servono Expo Go, account Expo o Apple Developer.
 Il PC Windows ospita sia il sito sia i dati. Deve restare acceso, con il servizio aperto.

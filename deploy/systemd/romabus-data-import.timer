@@ -1,5 +1,5 @@
 [Unit]
-Description=Aggiornamento giornaliero orari Roma Autobus alle 04:00 (Roma)
+Description=Aggiornamento giornaliero orari ROMABUS alle 04:00 (Roma)
 
 [Timer]
 OnCalendar=*-*-* 04:00:00 Europe/Rome

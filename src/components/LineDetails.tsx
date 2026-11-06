@@ -1,11 +1,12 @@
 import { Image, useImage, type ImageRef } from 'expo-image';
 import { useLineHeader } from '../lib/LineHeader';
 import { GlassPressable, GlassSurface } from '../ui/Glass';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
 import { visibleVehicles } from '../lib/vehicles';
+import { useTheme, type ThemeColors } from '../ui/Theme';
 
 const BUS_ICON = require('../../assets/bus-front.png');
 
@@ -16,6 +17,7 @@ type Directions = { route: Route; variants: Variant[] };
 type Board = Directions & { selectedVariant: Variant; stops: Stop[]; departures: { tripId: string; serviceDate: string; time: number; scheduledTime: number; kind: string }[]; window: { from: number; to: number }; liveAvailable: boolean; timestamp: number | null; departureLiveAvailable: boolean; departureTimestamp: number | null; unplacedVehicleCount: number };
 
 export function RouteDirections() {
+  const { s } = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const state = useData<Directions>(id ? `routes/${encodeURIComponent(id)}` : null, 10000, true);
   return <View style={s.stack}>
@@ -33,16 +35,18 @@ export function RouteDirections() {
 }
 
 function BusThumbnail({ vehicle, caption, onPress, image }: { vehicle: Vehicle; caption: string; onPress: () => void; image: ImageRef | null }) {
+  const { s, colors } = useStyles();
   return <Pressable accessibilityRole="button" accessibilityLabel={`Autobus ${vehicle.vehicleId || 'numero vettura non disponibile'}, ${caption}${vehicle.retained ? ', ultima posizione nota' : vehicle.positionSource === 'predictions' ? ', prossima fermata da previsioni live' : vehicle.estimated ? ', posizione approssimata' : ''}`} onPress={onPress} hitSlop={8} style={s.busButton}>
-    <Image source={image || BUS_ICON} placeholder={image || BUS_ICON} contentFit="contain" placeholderContentFit="contain" cachePolicy="memory-disk" transition={0} style={s.busImage} />
+    <Image source={image || BUS_ICON} tintColor={colors.accent} placeholder={image || BUS_ICON} contentFit="contain" placeholderContentFit="contain" cachePolicy="memory-disk" transition={0} style={s.busImage} />
     <Text numberOfLines={1} style={s.busId}>{vehicle.vehicleId || '—'}</Text>
   </Pressable>;
 }
 
 const positionStamp = (timestamp: number | null) => timestamp ? `Posizioni alle ${new Date(timestamp * 1000).toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Nessun aggiornamento';
 export function RouteTimeline() {
+  const { s, colors } = useStyles();
   // Share one decoded bitmap across rows: changing stop must not reload the icon.
-  const busImage = useImage(BUS_ICON, { maxWidth: 96, maxHeight: 96, tintColor: '#a01d35' });
+  const busImage = useImage(BUS_ICON, { maxWidth: 96, maxHeight: 96, tintColor: colors.accent }, [colors.accent]);
   const { publish } = useLineHeader();
   const { id, variant } = useLocalSearchParams<{ id: string; variant: string }>();
   const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 10000, true);
@@ -110,21 +114,27 @@ export function RouteTimeline() {
   </View>;
 }
 
-const s = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   flex: { flex: 1 }, stack: { gap: 14 }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  heading: { color: '#202d3a', fontSize: 20, fontWeight: '700', flexShrink: 1 }, muted: { color: '#596878', fontSize: 14, lineHeight: 21 }, small: { color: '#596878', fontSize: 11, lineHeight: 16 },
-  kicker: { color: '#a01d35', fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
-  direction: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 26, gap: 12 }, directionName: { color: '#202d3a', fontSize: 22, fontWeight: '700', marginBottom: 8 }, chevron: { color: '#a01d35', fontSize: 30 },
+  heading: { color: colors.text, fontSize: 20, fontWeight: '700', flexShrink: 1 }, muted: { color: colors.muted, fontSize: 14, lineHeight: 21 }, small: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  kicker: { color: colors.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
+  direction: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 26, gap: 12 }, directionName: { color: colors.text, fontSize: 22, fontWeight: '700', marginBottom: 8 }, chevron: { color: colors.accent, fontSize: 30 },
   departureStrip: { gap: 3, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 },
-  departureLabel: { flexShrink: 0, fontSize: 11, color: '#596878', fontWeight: '600' }, departureScroller: { height: 26 }, departureTrack: { minHeight: 26, alignItems: 'center', gap: 14, paddingRight: 6 }, departureTime: { fontSize: 14, color: '#202d3a', fontWeight: '700' }, departureKind: { fontSize: 10, fontWeight: '400' }, liveTime: { color: '#167450' }, pastTime: { color: '#8b9298' },
-  terminalDeparture: { color: '#167450', backgroundColor: '#e2f3e9', borderRadius: 5, paddingHorizontal: 5 },
-  expectedTime: { color: '#167450', backgroundColor: '#e2f3e9', padding: 8, borderRadius: 8, fontSize: 15, fontWeight: '700' },
+  departureLabel: { flexShrink: 0, fontSize: 11, color: colors.muted, fontWeight: '600' }, departureScroller: { height: 26 }, departureTrack: { minHeight: 26, alignItems: 'center', gap: 14, paddingRight: 6 }, departureTime: { fontSize: 14, color: colors.text, fontWeight: '700' }, departureKind: { fontSize: 10, fontWeight: '400' }, liveTime: { color: colors.live }, pastTime: { color: colors.placeholder },
+  terminalDeparture: { color: colors.live, backgroundColor: colors.liveSoft, borderRadius: 5, paddingHorizontal: 5 },
+  expectedTime: { color: colors.live, backgroundColor: colors.liveSoft, padding: 8, borderRadius: 8, fontSize: 15, fontWeight: '700' },
   timeline: { borderRadius: 26, paddingVertical: 14, paddingRight: 14, overflow: 'hidden' }, timelineRow: { flexDirection: 'row', alignItems: 'stretch', minHeight: 48 },
-  vehicleLane: { width: 64, justifyContent: 'center', alignItems: 'center' }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: '#16845e', minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', borderWidth: 2, borderColor: '#16845e' }, lastStop: { backgroundColor: '#a01d35', borderColor: '#a01d35', borderRadius: 2 },
-  stopName: { flex: 1, justifyContent: 'center', paddingLeft: 12, paddingVertical: 10, minHeight: 48 }, stopText: { color: '#a01d35', fontWeight: '700', fontSize: 15, lineHeight: 21 },
-  stopTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stopArrow: { color: '#a01d35', fontSize: 22 },
+  vehicleLane: { width: 64, justifyContent: 'center', alignItems: 'center' }, rail: { width: 18, alignItems: 'center' }, line: { flex: 1, width: 3, backgroundColor: colors.rail, minHeight: 12 }, invisible: { backgroundColor: 'transparent' }, stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.rail }, lastStop: { backgroundColor: colors.accent, borderColor: colors.accent, borderRadius: 2 },
+  stopName: { flex: 1, justifyContent: 'center', paddingLeft: 12, paddingVertical: 10, minHeight: 48 }, stopText: { color: colors.accent, fontWeight: '700', fontSize: 15, lineHeight: 21 },
+  stopTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stopArrow: { color: colors.accent, fontSize: 22 },
   busBefore: { position: 'absolute', top: -12, left: 0, right: 0, height: 26 }, busAt: { height: 26, flexGrow: 0, width: '100%' }, busTrack: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   busButton: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },
-  busImage: { width: 22, height: 18 }, busId: { fontSize: 7, lineHeight: 8, color: '#a01d35', maxWidth: 30 },
-  vehicleInfo: { borderRadius: 20, margin: 10, padding: 16, gap: 8 }, link: { color: '#a01d35', fontSize: 14, fontWeight: '600' }, close: { fontSize: 28, color: '#a01d35', paddingHorizontal: 10 },
+  busImage: { width: 22, height: 18 }, busId: { fontSize: 7, lineHeight: 8, color: colors.accent, maxWidth: 30 },
+  vehicleInfo: { borderRadius: 20, margin: 10, padding: 16, gap: 8 }, link: { color: colors.accent, fontSize: 14, fontWeight: '600' }, close: { fontSize: 28, color: colors.accent, paddingHorizontal: 10 },
 });
+
+function useStyles() {
+  const theme = useTheme();
+  const s = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  return { ...theme, s };
+}

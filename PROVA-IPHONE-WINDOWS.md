@@ -104,7 +104,7 @@ Se una riga degli arrivi non apriva l’itinerario, aggiorna `App.tsx` e tutta `
 
 ## Aggiornamento del logo e dell’avvio
 
-Dallo ZIP GitHub aggiornato copia `App.tsx`, tutta `assets`, `app.json`, `package.json` e `package-lock.json` nella cartella del progetto. Arresta Expo con Ctrl+C, esegui `npm ci`, poi `npm start -- --clear --lan` mantenendo la variabile del backend. Il logo è visibile sotto ROMA · AUTOBUS nella home e nella breve vista di caricamento JS. In Expo Go la schermata nativa può mostrare l’icona dell’app: lo splash completo configurato sarà verificabile in una build release. Questo aggiornamento non richiede modifiche ai dati degli autobus.
+Dallo ZIP GitHub aggiornato copia `App.tsx`, tutta `assets`, `app.json`, `package.json` e `package-lock.json` nella cartella del progetto. Arresta Expo con Ctrl+C, esegui `npm ci`, poi `npm start -- --clear --lan` mantenendo la variabile del backend. Il logo è visibile sotto ROMABUS nella home e nella breve vista di caricamento JS. In Expo Go la schermata nativa può mostrare l’icona dell’app: lo splash completo configurato sarà verificabile in una build release. Questo aggiornamento non richiede modifiche ai dati degli autobus.
 
 
 ## Aggiornare home, direzioni e linee recenti

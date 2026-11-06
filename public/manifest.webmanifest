@@ -1,12 +1,12 @@
 {
   "id": "/",
-  "name": "Roma Autobus",
-  "short_name": "Roma Autobus",
+  "name": "ROMABUS",
+  "short_name": "ROMABUS",
   "lang": "it",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f6eef2",
-  "theme_color": "#f6eef2",
+  "background_color": "#f7f8fa",
+  "theme_color": "#f7f8fa",
   "icons": [{ "src": "/app-icon-bus.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" }]
 }

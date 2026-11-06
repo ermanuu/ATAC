@@ -103,6 +103,6 @@ def serve(application, host, port, *, asynchronous=False):
         run(application, host=host, port=port,
             threads=int(os.getenv('WEB_THREADS', '8')),
             connection_limit=256, channel_timeout=30,
-            ident='Roma Autobus', log_socket_errors=False)
+            ident='ROMABUS', log_socket_errors=False)
     finally:
         realtime.stop()

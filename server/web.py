@@ -88,5 +88,5 @@ if __name__ == '__main__':
         raise SystemExit('Versione web assente: esegui prima npm run build:web.')
     host = os.getenv('WEB_HOST', '127.0.0.1')
     port = int(os.getenv('WEB_PORT', '8000'))
-    print(f'Roma Autobus web: http://{host}:{port}', flush=True)
+    print(f'ROMABUS web: http://{host}:{port}', flush=True)
     serve(application, host, port, asynchronous=True)

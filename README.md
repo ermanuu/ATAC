@@ -1,4 +1,4 @@
-# ATAC · Autobus Roma per iPhone
+# ROMABUS · Autobus di Roma per iPhone
 
 Prima versione di un’app indipendente Expo / React Native, con un backend Python che legge gli open data di Roma Servizi per la Mobilità. Il nome del progetto non implica affiliazione con ATAC o Roma Mobilità.
 
@@ -6,9 +6,15 @@ Per provarla gratuitamente da Windows su iPhone, segui [la guida passo passo](PR
 
 ## Funzionalità
 
-La home mostra il logo ATAC aggiornato con ROMA · AUTOBUS sotto, titolo, sottotitolo e tre pulsanti: **Cerca linea**, **Cerca fermata**, **Calcola percorso**. Fuori dalla home una barra flottante inferiore permette di passare fra Linee/Fermate/Percorso, anche nei dettagli di linee e fermate. I ritorni restano in alto a sinistra; nel percorso il titolo linea-direzione è fisso al centro e Cambia Direzione è a destra. Le partenze sono una riga orizzontale compatta e le fermate si aprono con la freccia accanto al nome.
+La home mostra il simbolo dell’autobus con ROMABUS sotto, titolo, sottotitolo, tre pulsanti (**Cerca linea**, **Cerca fermata**, **Calcola percorso**) e la voce **Impostazioni**. Fuori dalla home una barra flottante inferiore permette di passare fra Linee/Fermate/Percorso/Impostazioni, anche nei dettagli di linee e fermate. I ritorni restano in alto a sinistra; nel percorso il titolo linea-direzione è fisso al centro e Cambia Direzione è a destra. Le partenze sono una riga orizzontale compatta e le fermate si aprono con la freccia accanto al nome.
 
-Lo stile usa superfici traslucide, sfocatura, bordi luminosi e sfondo sfumato. I controlli flottanti usano `expo-glass-effect` con Liquid Glass nativo quando entrambe le verifiche API/runtime confermano la compatibilità (iOS 26+); altrove usano `expo-blur`. Con “Riduci trasparenza” di iOS le superfici diventano opache. I tre moduli Expo aggiunti sono inclusi in Expo Go SDK 58. L’effetto nativo e le impostazioni di accessibilità vanno verificati su iPhone: il controllo in browser verifica il fallback.
+L’aspetto segue il dispositivo: **Chiaro** usa superfici bianche e rosso scuro; **Scuro** usa blu notte, testo avorio e accenti rossi. In **Impostazioni → Aspetto** si sceglie uno dei temi oppure **Automatico**. La preferenza viene salvata sul dispositivo e vale per tutte le schermate. Gli indicatori live restano verdi in entrambi i temi. Il nome visualizzato, il titolo web e il nome dell’app installata sono **ROMABUS**.
+
+Le **Impostazioni** mostrano anche versione e copyright configurati in `app.json` e lo stato dei feed realtime di `romamobilita.it`. Posizioni autobus e previsioni di arrivo vengono controllate separatamente tramite `/api/status`, con orario dei feed, indirizzi della fonte, controllo automatico ogni 10 secondi e **Verifica ora** per richiedere dati nuovi. Lo stato considera la validità dei timestamp: dati scaduti o conservati dopo un errore non fanno risultare operativa la fonte. Se il servizio dell’app non è raggiungibile, lo stato della fonte viene indicato come non verificabile.
+
+Entrambi i temi mantengono lo sfondo originale con sfere sfumate rosse e azzurre: toni chiari nella versione diurna e sfumature più profonde nella versione notturna.
+
+Le schede e i controlli usano superfici opache e bordi definiti per mantenere leggibili orari e fermate sullo sfondo decorativo. Le sfumature dello sfondo usano `expo-linear-gradient`, incluso in Expo Go SDK 58.
 
 - Ritorno fisso alla home in alto a sinistra nelle tre categorie. Le ultime dieci linee aperte vengono salvate sul dispositivo e mostrate per prime nei risultati compatibili con la ricerca.
 - Ricerca delle linee autobus, scelta della direzione e delle varianti di percorso, partenze dal capolinea da 10 minuti fa a un’ora avanti ed elenco delle fermate.

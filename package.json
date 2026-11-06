@@ -14,6 +14,7 @@
     "expo-router": "~58.0.28",
     "expo-splash-screen": "~58.0.12",
     "expo-status-bar": "~58.0.4",
+    "expo-system-ui": "~58.0.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
@@ -39,7 +40,7 @@
     "api": "node scripts/backend.mjs -m server.app",
     "data:import": "node scripts/backend.mjs -m server.import_gtfs",
     "lint": "expo lint",
-    "test:client": "node tests/resolve-arrival.test.mjs && node tests/arrivals-favorites.test.mjs && node tests/vehicles.test.mjs"
+    "test:client": "node tests/resolve-arrival.test.mjs && node tests/arrivals-favorites.test.mjs && node tests/vehicles.test.mjs && node tests/feed-status.test.mjs"
   },
   "private": true
 }
