@@ -40,7 +40,9 @@ export function Notice({ text }: { text: string }) {
 }
 export function Badge({ name }: { name: string }) {
   const { s } = useStyles();
-  return <View style={s.badge}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={s.badgeText}>{name}</Text></View>;
+  // Web text does not implement adjustsFontSizeToFit: reserve room for night-line prefixes too.
+  const fontSize = Math.min(18, Math.floor(62 / Math.max(1, Array.from(name).length)));
+  return <View style={s.badge}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={[s.badgeText, { fontSize }]}>{name}</Text></View>;
 }
 
 // Abort obsolete requests. Retained line boards check vehicle freshness separately.
@@ -358,7 +360,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted }, body: { ...typography.body, color: colors.text, fontWeight: '600' },
   input: { ...getSurfaceStyle(colors), ...typography.body, minHeight: 56, borderRadius: layout.radius, paddingHorizontal: layout.cardPadding, paddingVertical: 16, color: colors.text, marginVertical: 8 },
   route: { padding: layout.cardPadding, flexDirection: 'row', gap: 14, alignItems: 'center' },
-  badge: { width: 52, minHeight: 52, borderRadius: 12, paddingHorizontal: 4, paddingVertical: 12, backgroundColor: colors.accentFill, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.accentFill }, badgeText: { color: colors.onAccent, fontSize: 18, lineHeight: 24, fontWeight: '800' },
+  badge: { width: 52, minHeight: 52, borderRadius: 12, paddingHorizontal: 3, paddingVertical: 12, backgroundColor: colors.accentFill, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.accentFill }, badgeText: { maxWidth: '100%', textAlign: 'center', color: colors.onAccent, fontSize: 18, lineHeight: 24, fontWeight: '800' },
   arrow: { fontSize: 28, color: colors.accent }, time: { ...typography.time, color: colors.text },
   favoriteRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }, favoriteOpen: { flex: 1, minWidth: 0, paddingVertical: 16, gap: 4 }, favoriteToggle: { flexShrink: 0, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, favoriteStar: { fontSize: 27, color: colors.accent },
   liveEta: { color: colors.live },

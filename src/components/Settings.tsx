@@ -33,16 +33,6 @@ export function Settings() {
     </GlassSurface>
 
     <GlassSurface style={s.section}>
-      <Text accessibilityRole="header" style={s.heading}>Informazioni sull’app</Text>
-      <Text style={s.brand}>ROMABUS</Text>
-      <View style={s.infoRow}><Text style={s.body}>Versione</Text><Text selectable style={s.value}>{version}</Text></View>
-      <View style={s.infoFooter}>
-        <Text style={[s.small, s.fallback]}>Se i dati realtime non sono disponibili, l’app usa gli orari programmati dove presenti.</Text>
-        <Text selectable style={s.copyright}>{copyright}</Text>
-      </View>
-    </GlassSurface>
-
-    <GlassSurface style={s.section}>
       <Text accessibilityRole="header" style={s.heading}>Stato dati realtime</Text>
       <Text selectable style={s.body}>romamobilita.it</Text>
       <View style={s.statusRow}>
@@ -63,6 +53,17 @@ export function Settings() {
         {state.loading && <ActivityIndicator color={colors.onAccent} />}
         <Text style={s.checkButtonText}>{state.loading ? 'Verifica in corso…' : 'Verifica ora'}</Text>
       </GlassPressable>
+    </GlassSurface>
+
+    <GlassSurface style={s.section}>
+      <Text accessibilityRole="header" style={s.heading}>Informazioni sull’app</Text>
+      <Text style={s.brand}>ROMABUS</Text>
+      <View style={s.infoRow}><Text style={s.body}>Versione</Text><Text selectable style={s.value}>{version}</Text></View>
+      <Text style={s.small}>Dati di Roma Servizi per la Mobilità.</Text>
+      <View style={s.infoFooter}>
+        <Text style={[s.small, s.fallback]}>Se i dati realtime non sono disponibili, l’app usa gli orari programmati dove presenti.</Text>
+        <Text selectable style={s.copyright}>{copyright}</Text>
+      </View>
     </GlassSurface>
   </View>;
 }

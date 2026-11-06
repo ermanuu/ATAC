@@ -4,17 +4,18 @@ import { clock } from '../../App';
 import { departureLabel, departureState, type Departure } from '../lib/departures';
 import { useTheme } from '../ui/Theme';
 import { typography } from '../ui/design';
+import { LiveIndicator } from '../ui/LiveIndicator';
 
 export function DepartureTime({ departure, now, boxed = false }: { departure: Departure; now: number; boxed?: boolean }) {
   const { colors } = useTheme();
   const status = departureState(departure, now);
   const highlighted = departure.kind === 'live';
-  const label = departureLabel(departure, now);
+  const label = boxed && highlighted ? 'Live' : departureLabel(departure, now);
   const color = highlighted ? colors.live : status === 'departed' ? colors.muted : colors.text;
   return <View accessible accessibilityLabel={`Partenza ${clock(departure.time)}, ${label}, ${departure.kind === 'live' ? 'previsione live' : 'orario programmato'}`}
     style={[styles.content, boxed && [styles.tile, { backgroundColor: status === 'terminal' && highlighted ? colors.liveSoft : colors.surfaceAlt, borderColor: status === 'terminal' && highlighted ? colors.live : colors.border }]]}>
     <Text style={[styles.time, { color }]}>{clock(departure.time)}</Text>
-    <Text numberOfLines={1} style={[styles.status, { color: highlighted ? colors.live : colors.muted }]}>{label}</Text>
+    {boxed && highlighted ? <LiveIndicator /> : <Text numberOfLines={1} style={[styles.status, { color: highlighted ? colors.live : colors.muted }]}>{label}</Text>}
   </View>;
 }
 
