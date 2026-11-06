@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prioritizeArrivals, visibleArrivals } from '../src/lib/arrivals.ts';
+import { nextDeparture, prioritizeArrivals, visibleArrivals } from '../src/lib/arrivals.ts';
 import { parseFavoriteStops, toggleFavoriteStop } from '../src/lib/favoriteStops.ts';
 const a=(tripId,time,kind='scheduled',extra={})=>({tripId,routeId:'706',line:'706',headsign:'ROTELLINI',serviceDate:'20261030',stopSequence:10,time,scheduledTime:time,kind,...extra});
 test('live first; schedules are fallback per direction, not extra copies of a live direction',()=>{
@@ -63,4 +63,22 @@ test('favorites survive serialization, are unique by exact stop ID and can be re
 test('damaged or unrelated saved values cannot create broken favorite rows',()=>{
  assert.deepEqual(parseFavoriteStops('{bad'),[]);
  assert.deepEqual(parseFavoriteStops(JSON.stringify([null,{}, {stop_id:4,name:'Bad'}])),[]);
+});
+
+test('next departure uses the origin departure, never the stop arrival forecast',()=>{
+ const bus=a('terminal',1500,'live',{atTerminus:true,departureTime:1200,departureKind:'live',predictionTimestamp:1000});
+ assert.deepEqual(nextDeparture(bus,1000),{time:1200,kind:'live'});
+ assert.equal(nextDeparture(a('old-api',1500,'live',{atTerminus:true}),1000),null);
+ assert.equal(nextDeparture({...bus,atTerminus:false},1000),null);
+});
+test('expired departure forecasts use only a valid labelled timetable fallback',()=>{
+ const bus=a('terminal',1500,'live',{atTerminus:true,departureTime:1200,departureKind:'live',scheduledDepartureTime:1300,predictionTimestamp:800});
+ assert.deepEqual(nextDeparture(bus,1000),{time:1300,kind:'scheduled'});
+ assert.equal(nextDeparture({...bus,scheduledDepartureTime:900},1000),null);
+});
+test('past or missing departure times are not shown as upcoming departures',()=>{
+ const bus=a('terminal',1500,'live',{atTerminus:true,departureTime:900,departureKind:'live',predictionTimestamp:1000});
+ assert.equal(nextDeparture(bus,1000),null);
+ assert.equal(nextDeparture({...bus,departureTime:NaN},1000),null);
+ assert.equal(nextDeparture({...bus,departureTime:9000},1000),null);
 });

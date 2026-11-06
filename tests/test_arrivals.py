@@ -51,6 +51,60 @@ class StopArrivalsTests(unittest.TestCase):
         vehicle.timestamp = self.now - 181
         self.assertFalse(item()['atTerminus'])
 
+    def terminal_update(self):
+        feed = self.feed()
+        entity = feed.entity.add(); entity.id = 'prediction'
+        update = entity.trip_update; update.trip.trip_id = 't1'
+        update.timestamp = self.now
+        event = update.stop_time_update.add(); event.stop_id = 'b'
+        event.arrival.time = self.now + 600
+        entity = feed.entity.add(); entity.id = 'bus'
+        vehicle = entity.vehicle; vehicle.trip.trip_id = 't1'
+        vehicle.vehicle.label = '2687'; vehicle.stop_id = 'a'
+        vehicle.current_status = pb.VehiclePosition.STOPPED_AT
+        vehicle.timestamp = self.now
+        return update
+
+    def test_terminal_departure_uses_origin_event_instead_of_downstream_eta(self):
+        update = self.terminal_update()
+        origin = update.stop_time_update.add(); origin.stop_id = 'a'
+        origin.departure.time = self.now + 180
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertTrue(item['atTerminus'])
+        self.assertEqual(item['time'], self.now + 600)
+        self.assertEqual(item['departureTime'], self.now + 180)
+        self.assertEqual(item['departureKind'], 'live')
+
+    def test_terminal_departure_falls_back_to_explicitly_programmed_origin_time(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE times SET departure=36120 WHERE trip_id='t1' AND stop_id='a'")
+        self.terminal_update()
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertEqual(item['departureTime'], self.now + 120)
+        self.assertEqual(item['departureKind'], 'scheduled')
+        self.assertEqual(item['scheduledDepartureTime'], self.now + 120)
+
+    def test_origin_departure_delay_uses_departure_schedule_not_origin_arrival(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE times SET departure=36120 WHERE trip_id='t1' AND stop_id='a'")
+        update = self.terminal_update()
+        origin = update.stop_time_update.add(); origin.stop_id = 'a'
+        origin.arrival.delay = 30; origin.departure.delay = 120
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertEqual(item['departureTime'], self.now + 240)
+        self.assertEqual(item['departureKind'], 'live')
+
+    def test_past_origin_departure_does_not_reuse_a_future_downstream_eta(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE times SET departure=35900 WHERE trip_id='t1' AND stop_id='a'")
+        update = self.terminal_update()
+        origin = update.stop_time_update.add(); origin.stop_id = 'a'
+        origin.departure.time = self.now - 10
+        item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
+        self.assertTrue(item['atTerminus'])
+        self.assertEqual(item['time'], self.now + 600)
+        self.assertNotIn('departureTime', item)
+
     def test_omitted_stop_does_not_invent_a_live_eta_or_waiting_row(self):
         feed = self.feed()
         # Like 74354, the next stop has no direct realtime ETA. Only the

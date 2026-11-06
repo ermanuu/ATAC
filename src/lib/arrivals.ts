@@ -1,4 +1,4 @@
-export type Arrival = { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; atTerminus?: boolean; atTerminusTimestamp?: number; line: string; headsign: string; time: number | null; scheduledTime?: number; kind: string; serviceDate?: string; stopSequence?: number; predictionTimestamp?: number; predictionSource?: string };
+export type Arrival = { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; atTerminus?: boolean; atTerminusTimestamp?: number; line: string; headsign: string; time: number | null; scheduledTime?: number; departureTime?: number; scheduledDepartureTime?: number; departureKind?: 'live' | 'scheduled'; kind: string; serviceDate?: string; stopSequence?: number; predictionTimestamp?: number; predictionSource?: string };
 const direction = (a: Arrival) => JSON.stringify([a.line.trim().toLocaleUpperCase('it-IT'), a.headsign.trim().replace(/\s+/g, ' ').toLocaleUpperCase('it-IT'), a.serviceDate || '']);
 type TimedArrival = Arrival & { time: number };
 const priority = (a: Arrival) => a.kind === 'live' ? 0 : 1;
@@ -29,4 +29,16 @@ export function visibleArrivals(arrivals: Arrival[], now: number, liveFresh: boo
     }
     return item;
   })).filter(a => a.time >= now && a.time <= now + 7200);
+}
+
+/** Never relabel a downstream arrival forecast as an origin departure. */
+export function nextDeparture(arrival: Arrival, now: number): { time: number; kind: 'live' | 'scheduled' } | null {
+  if (!arrival.atTerminus) return null;
+  const upcoming = (value: number | undefined): value is number => typeof value === 'number' && Number.isFinite(value) && now <= value && value <= now + 7200;
+  const predictionFresh = arrival.predictionTimestamp !== undefined && 0 <= now - arrival.predictionTimestamp && now - arrival.predictionTimestamp <= 180;
+  if (upcoming(arrival.departureTime) && arrival.departureKind === 'live' && arrival.kind === 'live' && predictionFresh) {
+    return { time: arrival.departureTime, kind: 'live' };
+  }
+  const scheduled = arrival.departureKind === 'scheduled' ? arrival.departureTime : arrival.scheduledDepartureTime;
+  return upcoming(scheduled) ? { time: scheduled, kind: 'scheduled' } : null;
 }

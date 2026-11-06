@@ -345,7 +345,7 @@ def stop_schedule(db, stop_id, now):
                         patterns[r['trip_id']] = trip_stops(db, r['trip_id'])
                         stop_ids = [s['stop_id'] for s in patterns[r['trip_id']]]
                         variants[r["trip_id"]] = variant_id(r["direction"], r["headsign"], stop_ids)
-                    scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "kind": "scheduled", "serviceDate": service_date})
+                    scheduled.append({"tripId": r["trip_id"], "routeId": r["route_id"], "variantId": variants[r["trip_id"]], "vehicleId": None, "stopSequence": r["sequence"], "line": r["name"], "headsign": r["headsign"], "time": int(epoch+r["arrival"]), "scheduledTime": int(epoch+r["arrival"]), "scheduledDepartureTime": int(epoch+patterns[r['trip_id']][0]['departure']), "kind": "scheduled", "serviceDate": service_date})
         return scheduled, patterns
 
     # Use the generation of the opened connection, including during replacement.
@@ -362,6 +362,7 @@ def arrivals(stop_id, refresh=False):
     scheduled = [dict(item) for item in candidates
                  if now-1800 <= item['scheduledTime'] <= now+7200]
     live = read_live("updates", refresh)
+    resolved = {}
     if live["available"]:
         by_trip = {}
         for e in live["feed"].entity:
@@ -373,7 +374,6 @@ def arrivals(stop_id, refresh=False):
                 if 0 <= now - stamp <= 180 and (previous is None or stamp >= int(previous.timestamp or live['timestamp'] or 0)):
                     by_trip[key] = update
         keep = []
-        resolved = {}
         for item in scheduled:
             update = by_trip.get((item["tripId"], item["serviceDate"]))
             if update is None:
@@ -438,6 +438,13 @@ def arrivals(stop_id, refresh=False):
             item['atTerminus'] = len(numbers) == 1 and all(terminal for _, terminal, _ in matching)
             if item['atTerminus']:
                 item['atTerminusTimestamp'] = min(stamp for _, _, stamp in matching)
+                # The origin's departure is distinct from the selected stop's ETA.
+                origin = resolved.get((item['tripId'], item['serviceDate']), {}).get(0, {})
+                departure = origin.get('departure')
+                if departure is not None and now <= departure <= now+7200:
+                    item.update(departureTime=departure, departureKind='live')
+                elif not origin.get('skipped') and now <= item['scheduledDepartureTime'] <= now+7200:
+                    item.update(departureTime=item['scheduledDepartureTime'], departureKind='scheduled')
             if not item["vehicleId"] and len(numbers) == 1:
                 item["vehicleId"] = numbers.pop()
     unique = {}

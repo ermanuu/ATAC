@@ -1,4 +1,4 @@
-import { visibleArrivals, type Arrival } from './src/lib/arrivals';
+import { nextDeparture, visibleArrivals, type Arrival } from './src/lib/arrivals';
 import { parseFavoriteStops, toggleFavoriteStop } from './src/lib/favoriteStops';
 import { LineHeaderProvider, useLineHeader } from './src/lib/LineHeader';
 import { RefreshProvider, useRefresh } from './src/lib/Refresh';
@@ -8,7 +8,7 @@ import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/Theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
@@ -226,6 +226,7 @@ export function Lines() {
 }
 export function Stops() {
   const { s, colors } = useStyles();
+  const { fontScale } = useWindowDimensions();
   const [favorites, setFavorites] = useState<Stop[]>([]);
   const [favoritesReady, setFavoritesReady] = useState(false);
   const [favoriteError, setFavoriteError] = useState('');
@@ -294,10 +295,25 @@ export function Stops() {
     {state.data && <>
       <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
-      {arrivals.map((a,i) => <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={s.route} onPress={() => { void openArrival(a); }}>
-        <Badge name={a.line} /><View style={s.flex}><Text style={s.body}>{a.headsign || 'Autobus'}</Text><Text style={[s.small, a.kind === 'live' && { color: colors.live }]}>{a.kind === 'live' ? `● Live${a.atTerminus ? ' · al capolinea' : ''} · vettura ${a.vehicleId || 'non disponibile'}` : 'Orario programmato'}</Text></View>
-        <View style={s.arrivalTime}><Text style={[s.time, a.kind === 'live' && s.liveEta]}>{Math.ceil((a.time - now) / 60) <= 1 ? 'In arrivo' : `${Math.ceil((a.time - now) / 60)} min`}</Text><Text style={[s.small, a.kind === 'live' && s.expectedClock]}>{clock(a.time)} ›</Text></View>
-      </GlassPressable>)}
+      {arrivals.map((a,i) => {
+        const departure = nextDeparture(a, now);
+        const timing = a.atTerminus ? `Prossima partenza: ${departure ? `${clock(departure.time)}${departure.kind === 'scheduled' ? ', programmata' : ''}` : 'non disponibile'}` : Math.ceil((a.time - now) / 60) <= 1 ? 'In arrivo' : `${Math.ceil((a.time - now) / 60)} min`;
+        return <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}, ${timing}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={[s.arrivalCard, { minHeight: 112 * fontScale }]} onPress={() => { void openArrival(a); }}>
+          <View style={s.arrivalRow}>
+            <View style={s.arrivalBadge}><Badge name={a.line} /></View>
+            <View style={s.arrivalDetails}>
+              <Text numberOfLines={2} style={[s.body, s.arrivalDestination]}>{a.headsign || 'Autobus'}</Text>
+              <Text numberOfLines={1} style={[s.small, s.arrivalStatus, a.kind === 'live' && { color: colors.live }]}>{a.kind === 'live' ? '● Live' : 'Orario programmato'}{a.atTerminus ? ' · al capolinea' : ''}</Text>
+              <Text numberOfLines={1} style={s.vehicleNumber}>Vettura {a.vehicleId || 'non disponibile'}</Text>
+            </View>
+            <View style={s.arrivalTiming}>
+              {a.atTerminus
+                ? <><Text style={s.departureLabel}>Prossima{'\n'}partenza:</Text><Text maxFontSizeMultiplier={1.4} style={departure ? s.departureClock : s.timingNote}>{departure ? clock(departure.time) : 'Non disponibile'}</Text>{departure?.kind === 'scheduled' && <Text style={s.timingNote}>Programmata</Text>}</>
+                : <Text maxFontSizeMultiplier={1.4} style={[s.time, a.kind === 'live' && s.liveEta]}>{timing}</Text>}
+            </View>
+          </View>
+        </GlassPressable>;
+      })}
     </>}
   </View>;
 }
@@ -330,14 +346,14 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   boardScroll: { paddingBottom: 190 },
   lineRefreshDock: { position: 'absolute', right: 20 }, lineRefreshButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, lineRefreshIcon: { fontSize: 30, color: colors.onAccent, lineHeight: 34 },
   muted: { color: colors.muted, fontSize: 14, lineHeight: 21 }, small: { color: colors.muted, fontSize: 11, lineHeight: 16 }, body: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  expectedClock: { color: colors.live, fontWeight: '800', backgroundColor: colors.liveSoft, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   input: { ...getSurfaceStyle(colors), borderRadius: 24, paddingHorizontal: 16, paddingVertical: 16, color: colors.text, fontSize: 16, marginVertical: 12 },
   route: { padding: 16, flexDirection: 'row', gap: 14, alignItems: 'center' },
   badge: { minWidth: 52, borderRadius: 12, padding: 12, backgroundColor: colors.accentFill, alignItems: 'center', borderWidth: 1, borderColor: colors.accentFill }, badgeText: { color: colors.onAccent, fontSize: 18, fontWeight: '800' },
   arrow: { fontSize: 28, color: colors.accent }, time: { fontSize: 20, fontWeight: '700', color: colors.text },
   favoriteRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }, favoriteOpen: { flex: 1, paddingVertical: 16, gap: 4 }, favoriteToggle: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, favoriteStar: { fontSize: 27, color: colors.accent },
   liveEta: { color: colors.live },
-  arrivalTime: { alignItems: 'flex-end', gap: 4 },
+  arrivalCard: { padding: 14, justifyContent: 'center' }, arrivalRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, arrivalBadge: { width: 56 }, arrivalDetails: { flex: 1, minWidth: 0, gap: 3 }, arrivalDestination: { lineHeight: 20 }, arrivalStatus: { fontSize: 10.5, lineHeight: 16 }, vehicleNumber: { color: colors.muted, fontSize: 12, lineHeight: 17 },
+  arrivalTiming: { width: 72, alignItems: 'flex-end', justifyContent: 'center', gap: 3 }, departureLabel: { color: colors.muted, fontSize: 10, lineHeight: 12, fontWeight: '600', textAlign: 'right' }, departureClock: { color: colors.live, fontSize: 20, lineHeight: 24, fontWeight: '800' }, timingNote: { color: colors.muted, fontSize: 10, lineHeight: 13, textAlign: 'right' },
   button: { padding: 16, borderRadius: 18, alignItems: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, buttonText: { color: colors.onAccent, fontWeight: '700', fontSize: 15 }, buttonDisabled: { backgroundColor: colors.disabled, borderColor: colors.border }, buttonDisabledText: { color: colors.muted },
   notice: { padding: 14, borderRadius: 20, marginVertical: 8 }, card: { borderRadius: 24, padding: 18, gap: 12 },
   link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
