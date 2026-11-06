@@ -94,7 +94,7 @@ class StopArrivalsTests(unittest.TestCase):
         self.assertEqual(item['departureTime'], self.now + 240)
         self.assertEqual(item['departureKind'], 'live')
 
-    def test_past_origin_departure_does_not_reuse_a_future_downstream_eta(self):
+    def test_past_origin_departure_falls_back_to_programmed_time_not_downstream_eta(self):
         with sqlite3.connect(t.DB) as db:
             db.execute("UPDATE times SET departure=35900 WHERE trip_id='t1' AND stop_id='a'")
         update = self.terminal_update()
@@ -103,7 +103,26 @@ class StopArrivalsTests(unittest.TestCase):
         item = next(a for a in t.arrivals('b')['arrivals'] if a['tripId'] == 't1')
         self.assertTrue(item['atTerminus'])
         self.assertEqual(item['time'], self.now + 600)
-        self.assertNotIn('departureTime', item)
+        self.assertEqual(item['departureTime'], self.now - 100)
+        self.assertEqual(item['departureKind'], 'scheduled')
+
+    def test_moving_vehicle_precedes_an_earlier_terminal_arrival(self):
+        self.terminal_update()
+        feed = self.live['feed']
+        entity = feed.entity.add(); entity.id = 'moving-prediction'
+        update = entity.trip_update; update.trip.trip_id = 't2'
+        event = update.stop_time_update.add(); event.stop_id = 'b'
+        event.arrival.time = self.now + 900
+        entity = feed.entity.add(); entity.id = 'moving-bus'
+        vehicle = entity.vehicle; vehicle.trip.trip_id = 't2'
+        vehicle.vehicle.label = '2231'; vehicle.stop_id = 'b'
+        vehicle.current_status = pb.VehiclePosition.IN_TRANSIT_TO
+        vehicle.timestamp = self.now
+        rows = t.arrivals('b')['arrivals']
+        self.assertEqual([row['tripId'] for row in rows], ['t2', 't1'])
+        self.assertFalse(rows[0]['atTerminus'])
+        self.assertTrue(rows[1]['atTerminus'])
+        self.assertGreater(rows[0]['time'], rows[1]['time'])
 
     def test_omitted_stop_does_not_invent_a_live_eta_or_waiting_row(self):
         feed = self.feed()

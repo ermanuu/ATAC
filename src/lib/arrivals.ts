@@ -2,6 +2,7 @@ export type Arrival = { tripId: string; routeId?: string; variantId?: string; ve
 const direction = (a: Arrival) => JSON.stringify([a.line.trim().toLocaleUpperCase('it-IT'), a.headsign.trim().replace(/\s+/g, ' ').toLocaleUpperCase('it-IT'), a.serviceDate || '']);
 type TimedArrival = Arrival & { time: number };
 const priority = (a: Arrival) => a.kind === 'live' ? 0 : 1;
+const displayPriority = (a: Arrival) => a.kind === 'live' ? a.atTerminus ? 1 : 0 : 2;
 const directArrival = (a: Arrival): a is TimedArrival => a.time !== null &&
   (a.kind === 'live' || a.kind === 'scheduled') && a.predictionSource !== 'propagated';
 /** Live is authoritative for a direction; schedules are its fallback. */
@@ -15,7 +16,7 @@ export function prioritizeArrivals(arrivals: Arrival[]) {
   }
   const liveDirections = new Set([...unique.values()].filter(a => a.kind === 'live').map(direction));
   return [...unique.values()].filter(a => a.kind === 'live' || !liveDirections.has(direction(a)))
-    .sort((a, b) => priority(a) - priority(b) || a.time - b.time);
+    .sort((a, b) => displayPriority(a) - displayPriority(b) || a.time - b.time);
 }
 export function visibleArrivals(arrivals: Arrival[], now: number, liveFresh: boolean) {
   return prioritizeArrivals(arrivals.map(a => {
@@ -39,6 +40,9 @@ export function nextDeparture(arrival: Arrival, now: number): { time: number; ki
   if (upcoming(arrival.departureTime) && arrival.departureKind === 'live' && arrival.kind === 'live' && predictionFresh) {
     return { time: arrival.departureTime, kind: 'live' };
   }
-  const scheduled = arrival.departureKind === 'scheduled' ? arrival.departureTime : arrival.scheduledDepartureTime;
-  return upcoming(scheduled) ? { time: scheduled, kind: 'scheduled' } : null;
+  // A late bus can still be parked after its published departure time.
+  // Keep that timetable time explicitly labelled, rather than inventing a new one.
+  const scheduled = [arrival.scheduledDepartureTime, arrival.departureKind === 'scheduled' ? arrival.departureTime : undefined]
+    .find((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  return scheduled !== undefined ? { time: scheduled, kind: 'scheduled' } : null;
 }

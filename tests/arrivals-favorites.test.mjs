@@ -15,6 +15,23 @@ test('all real live buses remain; times are ordered inside each group',()=>{
  const result=prioritizeArrivals([a('l2',50,'live'),a('s2',30,'scheduled',{routeId:'700',line:'700'}),a('l1',40,'live'),a('s1',20,'scheduled',{routeId:'724',line:'724'})]);
  assert.deepEqual(result.map(x=>x.tripId),['l1','l2','s1','s2']);
 });
+test('moving live buses precede earlier terminal buses while timetable rows remain fallback',()=>{
+ const result=prioritizeArrivals([
+  a('parked1',20,'live',{atTerminus:true}),
+  a('moving2',80,'live',{atTerminus:false}),
+  a('scheduled',10,'scheduled',{routeId:'700',line:'700'}),
+  a('moving1',50,'live'),
+  a('parked2',30,'live',{atTerminus:true}),
+ ]);
+ assert.deepEqual(result.map(x=>x.tripId),['moving1','moving2','parked1','parked2','scheduled']);
+});
+test('ordering by terminal status never selects an older duplicate forecast',()=>{
+ const result=prioritizeArrivals([
+  a('same',50,'live',{atTerminus:false,predictionTimestamp:900}),
+  a('same',60,'live',{atTerminus:true,predictionTimestamp:1000}),
+ ]);
+ assert.equal(result.length,1);assert.equal(result[0].atTerminus,true);assert.equal(result[0].time,60);
+});
 test('opposite direction and next service day retain their schedules',()=>{
  const result=prioritizeArrivals([a('live',20,'live'),a('opposite',10,'scheduled',{headsign:'EUR FERMI (MB)'}),a('tomorrow',30,'scheduled',{serviceDate:'20261031'})]);
  assert.equal(result.length,3);
@@ -74,7 +91,13 @@ test('next departure uses the origin departure, never the stop arrival forecast'
 test('expired departure forecasts use only a valid labelled timetable fallback',()=>{
  const bus=a('terminal',1500,'live',{atTerminus:true,departureTime:1200,departureKind:'live',scheduledDepartureTime:1300,predictionTimestamp:800});
  assert.deepEqual(nextDeparture(bus,1000),{time:1300,kind:'scheduled'});
- assert.equal(nextDeparture({...bus,scheduledDepartureTime:900},1000),null);
+ assert.deepEqual(nextDeparture({...bus,scheduledDepartureTime:900},1000),{time:900,kind:'scheduled'});
+});
+test('a terminal bus retains its published departure even after that time has passed',()=>{
+ const bus=a('late-terminal',1500,'live',{atTerminus:true,scheduledDepartureTime:900});
+ assert.deepEqual(nextDeparture(bus,1000),{time:900,kind:'scheduled'});
+ assert.deepEqual(nextDeparture({...bus,departureKind:'scheduled',departureTime:undefined},1000),{time:900,kind:'scheduled'});
+ assert.equal(nextDeparture({...bus,scheduledDepartureTime:undefined},1000),null);
 });
 test('past or missing departure times are not shown as upcoming departures',()=>{
  const bus=a('terminal',1500,'live',{atTerminus:true,departureTime:900,departureKind:'live',predictionTimestamp:1000});

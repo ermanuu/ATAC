@@ -297,7 +297,10 @@ export function Stops() {
       {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => {
         const departure = nextDeparture(a, now);
-        const timing = a.atTerminus ? `Prossima partenza: ${departure ? `${clock(departure.time)}${departure.kind === 'scheduled' ? ', programmata' : ''}` : 'non disponibile'}` : Math.ceil((a.time - now) / 60) <= 1 ? 'In arrivo' : `${Math.ceil((a.time - now) / 60)} min`;
+        const minutes = Math.ceil((a.time - now) / 60);
+        const imminent = minutes <= 1;
+        const arrivalLabel = imminent ? 'In arrivo' : `${minutes} min`;
+        const timing = a.atTerminus ? `Prossima partenza: ${departure ? `${clock(departure.time)}${departure.kind === 'scheduled' ? ', programmata' : ''}` : 'non disponibile'}` : imminent ? arrivalLabel : `In arrivo tra: ${arrivalLabel}`;
         return <GlassPressable key={`${a.tripId}-${i}`} accessibilityRole="button" accessibilityLabel={`Linea ${a.line}, direzione ${a.headsign}, ${timing}${a.vehicleId ? `, vettura ${a.vehicleId}` : ''}, mostra itinerario e autobus`} disabled={openingRoute === a.tripId} style={[s.arrivalCard, { minHeight: 112 * fontScale }]} onPress={() => { void openArrival(a); }}>
           <View style={s.arrivalRow}>
             <View style={s.arrivalBadge}><Badge name={a.line} /></View>
@@ -309,7 +312,7 @@ export function Stops() {
             <View style={s.arrivalTiming}>
               {a.atTerminus
                 ? <><Text style={s.departureLabel}>Prossima{'\n'}partenza:</Text><Text maxFontSizeMultiplier={1.4} style={departure ? s.departureClock : s.timingNote}>{departure ? clock(departure.time) : 'Non disponibile'}</Text>{departure?.kind === 'scheduled' && <Text style={s.timingNote}>Programmata</Text>}</>
-                : <Text maxFontSizeMultiplier={1.4} style={[s.time, a.kind === 'live' && s.liveEta]}>{timing}</Text>}
+                : <>{!imminent && <Text numberOfLines={1} style={s.departureLabel}>In arrivo tra:</Text>}<Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.4} style={[s.time, a.kind === 'live' && s.liveEta, imminent && s.arrivalImminent]}>{arrivalLabel}</Text></>}
             </View>
           </View>
         </GlassPressable>;
@@ -354,6 +357,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   liveEta: { color: colors.live },
   arrivalCard: { padding: 14, justifyContent: 'center' }, arrivalRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, arrivalBadge: { width: 56 }, arrivalDetails: { flex: 1, minWidth: 0, gap: 3 }, arrivalDestination: { lineHeight: 20 }, arrivalStatus: { fontSize: 10.5, lineHeight: 16 }, vehicleNumber: { color: colors.muted, fontSize: 12, lineHeight: 17 },
   arrivalTiming: { width: 72, alignItems: 'flex-end', justifyContent: 'center', gap: 3 }, departureLabel: { color: colors.muted, fontSize: 10, lineHeight: 12, fontWeight: '600', textAlign: 'right' }, departureClock: { color: colors.live, fontSize: 20, lineHeight: 24, fontWeight: '800' }, timingNote: { color: colors.muted, fontSize: 10, lineHeight: 13, textAlign: 'right' },
+  arrivalImminent: { fontSize: 16, lineHeight: 24 },
   button: { padding: 16, borderRadius: 18, alignItems: 'center', backgroundColor: colors.accentFill, borderColor: colors.accentFill }, buttonText: { color: colors.onAccent, fontWeight: '700', fontSize: 15 }, buttonDisabled: { backgroundColor: colors.disabled, borderColor: colors.border }, buttonDisabledText: { color: colors.muted },
   notice: { padding: 14, borderRadius: 20, marginVertical: 8 }, card: { borderRadius: 24, padding: 18, gap: 12 },
   link: { color: colors.accent, fontWeight: '600', fontSize: 14 },

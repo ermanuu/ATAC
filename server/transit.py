@@ -443,7 +443,7 @@ def arrivals(stop_id, refresh=False):
                 departure = origin.get('departure')
                 if departure is not None and now <= departure <= now+7200:
                     item.update(departureTime=departure, departureKind='live')
-                elif not origin.get('skipped') and now <= item['scheduledDepartureTime'] <= now+7200:
+                elif not origin.get('skipped') and item['scheduledDepartureTime'] > 0:
                     item.update(departureTime=item['scheduledDepartureTime'], departureKind='scheduled')
             if not item["vehicleId"] and len(numbers) == 1:
                 item["vehicleId"] = numbers.pop()
@@ -454,7 +454,7 @@ def arrivals(stop_id, refresh=False):
         previous = unique.get(key)
         if previous is None or (rank[item['kind']], item.get('predictionTimestamp', 0)) > (rank[previous['kind']], previous.get('predictionTimestamp', 0)):
             unique[key] = item
-    scheduled = sorted(unique.values(), key=lambda item: (-rank[item['kind']], item['time'] or 0))
+    scheduled = sorted(unique.values(), key=lambda item: (-rank[item['kind']], bool(item.get('atTerminus')) if item['kind'] == 'live' else False, item['time'] or 0))
     return {"apiVersion": 2, "arrivals": scheduled,
             "liveAvailable": live["available"], "timestamp": live["timestamp"]}
 
