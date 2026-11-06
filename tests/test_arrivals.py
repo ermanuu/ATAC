@@ -216,6 +216,35 @@ class StopArrivalsTests(unittest.TestCase):
         self.assertEqual({a['line'] for a in arrivals},{'64','40'})
         self.assertEqual([a['time'] for a in arrivals],sorted(a['time'] for a in arrivals))
 
+    def test_arrival_window_includes_one_hour_but_nothing_later(self):
+        with sqlite3.connect(t.DB) as db:
+            for trip, offset in [('past', -1), ('now', 0), ('last-second', 3599), ('boundary', 3600), ('outside', 3601), ('two-hours', 7200)]:
+                db.execute('INSERT INTO trips VALUES (?,?,?,?,?)', (trip, 'r1', 'daily', trip, '0'))
+                db.execute('INSERT INTO times VALUES (?,?,?,?,?,?,?)', (trip, 'b', 1, 36000+offset, 36000+offset, 0, 0))
+        trips = {row['tripId'] for row in t.arrivals('b')['arrivals']}
+        self.assertTrue({'now', 'last-second', 'boundary'} <= trips)
+        self.assertTrue({'past', 'outside', 'two-hours'}.isdisjoint(trips))
+
+    def test_delayed_live_arrival_beyond_the_hour_is_excluded(self):
+        feed = self.feed()
+        entity = feed.entity.add(); entity.id = 'late'
+        entity.trip_update.trip.trip_id = 't1'
+        event = entity.trip_update.stop_time_update.add(); event.stop_id = 'b'
+        event.arrival.time = self.now + 3601
+        self.assertNotIn('t1', {row['tripId'] for row in t.arrivals('b')['arrivals']})
+
+    def test_early_live_arrival_can_enter_the_hour_from_a_later_timetable(self):
+        with sqlite3.connect(t.DB) as db:
+            db.execute("UPDATE times SET arrival=39660,departure=39660 WHERE trip_id='t1' AND stop_id='b'")
+        feed = self.feed()
+        entity = feed.entity.add(); entity.id = 'early'
+        entity.trip_update.trip.trip_id = 't1'
+        event = entity.trip_update.stop_time_update.add(); event.stop_id = 'b'
+        event.arrival.time = self.now + 3599
+        item = next(row for row in t.arrivals('b')['arrivals'] if row['tripId'] == 't1')
+        self.assertEqual(item['time'], self.now + 3599)
+        self.assertEqual(item['kind'], 'live')
+
     def test_more_than_twenty_arrivals_are_returned(self):
         with sqlite3.connect(t.DB) as db:
             for i in range(45):

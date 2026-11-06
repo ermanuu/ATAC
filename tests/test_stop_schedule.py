@@ -71,10 +71,10 @@ class StopScheduleTests(unittest.TestCase):
 
     def test_exact_rolling_upper_bound_inside_cached_minute(self):
         with sqlite3.connect(t.DB) as db:
-            db.execute("UPDATE times SET arrival=43201,departure=43201 WHERE trip_id='t1' AND stop_id='b'")
+            db.execute("UPDATE times SET arrival=39601,departure=39601 WHERE trip_id='t1' AND stop_id='b'")
         self.assertFalse(any(row['tripId'] == 't1' for row in t.arrivals('b')['arrivals']))
         self.clock.return_value = self.now + 1
-        self.assertEqual(self.item()['time'], self.now + 7201)
+        self.assertEqual(self.item()['time'], self.now + 3601)
 
     def test_candidate_expires_from_lookback_even_if_live_prediction_is_future(self):
         with sqlite3.connect(t.DB) as db:

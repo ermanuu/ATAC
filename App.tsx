@@ -294,7 +294,7 @@ export function Stops() {
     {state.data && !state.data.apiVersion && state.data.arrivals.some(a => !a.routeId) && <Notice text="Il servizio dati va aggiornato e riavviato: alcune informazioni sulle vetture non sono disponibili." />}
     {state.data && <>
       <Text style={s.muted}>{liveFresh ? stamp(state.data.timestamp) : 'Previsioni live non disponibili · solo orari programmati'}</Text>
-      {!arrivals.length && <Notice text="Nessun arrivo disponibile nelle prossime 2 ore. Riprova o aggiorna gli orari." />}
+      {!arrivals.length && <Notice text="Nessun arrivo disponibile nella prossima ora. Riprova o aggiorna gli orari." />}
       {arrivals.map((a,i) => {
         const departure = nextDeparture(a, now);
         const minutes = Math.ceil((a.time - now) / 60);

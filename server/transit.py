@@ -24,6 +24,7 @@ BASE = "https://romamobilita.it/sites/default/files/"
 STATIC_URL = BASE + "rome_static_gtfs.zip"
 VEHICLES_URL = BASE + "rome_rtgtfs_vehicle_positions_feed.pb"
 UPDATES_URL = BASE + "rome_rtgtfs_trip_updates_feed.pb"
+ARRIVAL_WINDOW_SECONDS = 3600
 ROME = ZoneInfo("Europe/Rome")
 # SQLite releases the GIL while stepping rows: overlapping large scans are
 # substantially slower than short queued reads on the 2-vCPU deployment.
@@ -335,8 +336,8 @@ def stop_schedule(db, stop_id, now):
 
     def build():
         scheduled, variants, patterns = [], {}, {}
-        # The upper padding admits candidates entering the two-hour window
-        # later in this minute. arrivals() reapplies the exact bounds each call.
+        # Keep a wider timetable lookahead for early realtime arrivals; the extra
+        # seconds cover the cached minute. arrivals() reapplies the one-hour limit.
         for epoch, active in service_windows(db, minute, 7200 + 59):
             service_date = datetime.fromtimestamp(epoch+43200, ROME).strftime('%Y%m%d')
             for r in db.execute("SELECT t.*,tr.service_id,tr.headsign,tr.route_id,tr.direction,r.name FROM times t JOIN trips tr ON tr.trip_id=t.trip_id JOIN routes r ON r.route_id=tr.route_id WHERE t.stop_id=? AND t.arrival BETWEEN ? AND ? AND r.type=3 AND (t.pickup!=1 OR t.dropoff!=1) ORDER BY t.arrival", (stop_id, minute-1800-epoch, minute+7200+59-epoch)):
@@ -402,7 +403,7 @@ def arrivals(stop_id, refresh=False):
                         item['vehicleId'] = update.vehicle.label.strip() or None
             keep.append(item)
         scheduled = keep
-    scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+7200), key=lambda i: i["time"])
+    scheduled = sorted((i for i in scheduled if now <= i["time"] <= now+ARRIVAL_WINDOW_SECONDS), key=lambda i: i["time"])
     if any(item['kind'] == 'live' for item in scheduled):
         positions = read_live("vehicles", refresh)
         assignments = {}
@@ -441,7 +442,7 @@ def arrivals(stop_id, refresh=False):
                 # The origin's departure is distinct from the selected stop's ETA.
                 origin = resolved.get((item['tripId'], item['serviceDate']), {}).get(0, {})
                 departure = origin.get('departure')
-                if departure is not None and now <= departure <= now+7200:
+                if departure is not None and now <= departure <= now+ARRIVAL_WINDOW_SECONDS:
                     item.update(departureTime=departure, departureKind='live')
                 elif not origin.get('skipped') and item['scheduledDepartureTime'] > 0:
                     item.update(departureTime=item['scheduledDepartureTime'], departureKind='scheduled')

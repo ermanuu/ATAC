@@ -1,4 +1,5 @@
 export type Arrival = { tripId: string; routeId?: string; variantId?: string; vehicleId?: string | null; atTerminus?: boolean; atTerminusTimestamp?: number; line: string; headsign: string; time: number | null; scheduledTime?: number; departureTime?: number; scheduledDepartureTime?: number; departureKind?: 'live' | 'scheduled'; kind: string; serviceDate?: string; stopSequence?: number; predictionTimestamp?: number; predictionSource?: string };
+export const ARRIVAL_WINDOW_SECONDS = 3600;
 const direction = (a: Arrival) => JSON.stringify([a.line.trim().toLocaleUpperCase('it-IT'), a.headsign.trim().replace(/\s+/g, ' ').toLocaleUpperCase('it-IT'), a.serviceDate || '']);
 type TimedArrival = Arrival & { time: number };
 const priority = (a: Arrival) => a.kind === 'live' ? 0 : 1;
@@ -19,7 +20,7 @@ export function prioritizeArrivals(arrivals: Arrival[]) {
     .sort((a, b) => displayPriority(a) - displayPriority(b) || a.time - b.time);
 }
 export function visibleArrivals(arrivals: Arrival[], now: number, liveFresh: boolean) {
-  return prioritizeArrivals(arrivals.map(a => {
+  const current = arrivals.map(a => {
     const item = a.kind === 'live' && (!liveFresh || (a.predictionTimestamp !== undefined && now - a.predictionTimestamp > 180))
       ? { ...a, time: a.scheduledTime || 0, kind: 'scheduled' } : a;
     const terminalFresh = item.atTerminusTimestamp !== undefined
@@ -29,13 +30,15 @@ export function visibleArrivals(arrivals: Arrival[], now: number, liveFresh: boo
       return { ...item, atTerminus: false, vehicleId: item.kind === 'live' ? item.vehicleId : null };
     }
     return item;
-  })).filter(a => a.time >= now && a.time <= now + 7200);
+  });
+  // Out-of-window live rows must not hide timetable arrivals inside this hour.
+  return prioritizeArrivals(current.filter(a => a.time !== null && a.time >= now && a.time <= now + ARRIVAL_WINDOW_SECONDS));
 }
 
 /** Never relabel a downstream arrival forecast as an origin departure. */
 export function nextDeparture(arrival: Arrival, now: number): { time: number; kind: 'live' | 'scheduled' } | null {
   if (!arrival.atTerminus) return null;
-  const upcoming = (value: number | undefined): value is number => typeof value === 'number' && Number.isFinite(value) && now <= value && value <= now + 7200;
+  const upcoming = (value: number | undefined): value is number => typeof value === 'number' && Number.isFinite(value) && now <= value && value <= now + ARRIVAL_WINDOW_SECONDS;
   const predictionFresh = arrival.predictionTimestamp !== undefined && 0 <= now - arrival.predictionTimestamp && now - arrival.predictionTimestamp <= 180;
   if (upcoming(arrival.departureTime) && arrival.departureKind === 'live' && arrival.kind === 'live' && predictionFresh) {
     return { time: arrival.departureTime, kind: 'live' };

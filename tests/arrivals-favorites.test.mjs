@@ -44,6 +44,28 @@ test('expired forecasts fall back to schedules and no longer hide untracked trip
  const result=visibleArrivals([a('live',1200,'live',{scheduledTime:1180,predictionTimestamp:800}),a('scheduled',1300)],1000,true);
  assert.deepEqual(result.map(x=>[x.tripId,x.kind,x.time]),[['live','scheduled',1180],['scheduled','scheduled',1300]]);
 });
+test('the visible window includes exactly the next hour for both live and scheduled arrivals',()=>{
+ const now=1000;
+ for(const kind of ['scheduled','live']){
+  const result=visibleArrivals([
+   a('past',now-1,kind,{predictionTimestamp:now}),
+   a('now',now,kind,{predictionTimestamp:now}),
+   a('last-second',now+3599,kind,{predictionTimestamp:now}),
+   a('boundary',now+3600,kind,{predictionTimestamp:now}),
+   a('outside',now+3601,kind,{predictionTimestamp:now}),
+   a('two-hours',now+7200,kind,{predictionTimestamp:now}),
+  ],now,true);
+  assert.deepEqual(result.map(row=>row.tripId),['now','last-second','boundary']);
+ }
+});
+test('a live forecast outside the hour does not hide an inside-hour timetable fallback',()=>{
+ const result=visibleArrivals([a('scheduled',2800),a('outside-live',4601,'live',{predictionTimestamp:1000})],1000,true);
+ assert.deepEqual(result.map(row=>row.tripId),['scheduled']);
+});
+test('the one-hour limit is applied after expired predictions fall back to their timetable',()=>{
+ const result=visibleArrivals([a('expired',5000,'live',{scheduledTime:4500,predictionTimestamp:800})],1000,true);
+ assert.deepEqual(result.map(row=>[row.tripId,row.kind,row.time]),[['expired','scheduled',4500]]);
+});
 test('terminal metadata does not turn a schedule into a live arrival',()=>{
  const result=visibleArrivals([a('known-terminal',1100,'scheduled',{vehicleId:'2687',atTerminus:true,atTerminusTimestamp:950}),a('other-live',1400,'live',{vehicleId:'2789',predictionTimestamp:950}),a('untracked',1300)],1000,true);
  assert.deepEqual(result.map(x=>x.tripId),['other-live']);
