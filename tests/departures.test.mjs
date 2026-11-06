@@ -10,9 +10,11 @@ test('the strip includes exactly minus five minutes to plus ninety minutes', () 
   assert.deepEqual(visibleDepartures(times.map(time => ({ ...departure, time })), now).map(d => d.time), times.slice(1, 7));
 });
 
-test('live departures always say LIVE, including parked buses and past forecasts', () => {
+test('live stays visible for parked buses but confirmed departures take priority', () => {
   assert.equal(departureLabel({ ...departure, kind: 'live', atTerminus: true, positionTimestamp: now }, now), 'LIVE');
-  assert.equal(departureLabel({ ...departure, kind: 'live', time: now-60, departed: true, positionTimestamp: now }, now), 'LIVE');
+  assert.equal(departureLabel({ ...departure, kind: 'live', time: now-60, departed: true, positionTimestamp: now }, now), 'Partito');
+  assert.equal(departureLabel({ ...departure, kind: 'live', time: now+60, departed: true, positionTimestamp: now }, now), 'Partito');
+  assert.equal(departureLabel({ ...departure, kind: 'live', time: now-60, atTerminus: true, positionTimestamp: now }, now), 'LIVE');
   assert.equal(departureLabel({ ...departure, time: now-60 }, now), 'Partito');
   assert.equal(departureLabel({ ...departure, atTerminus: true, positionTimestamp: now }, now), 'Program.');
 });

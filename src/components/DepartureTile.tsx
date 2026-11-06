@@ -9,7 +9,7 @@ import { LiveIndicator } from '../ui/LiveIndicator';
 export function DepartureTime({ departure, now, boxed = false }: { departure: Departure; now: number; boxed?: boolean }) {
   const { colors } = useTheme();
   const status = departureState(departure, now);
-  const highlighted = departure.kind === 'live';
+  const highlighted = departure.kind === 'live' && status !== 'departed';
   const label = boxed && highlighted ? 'Live' : departureLabel(departure, now);
   const color = highlighted ? colors.live : status === 'departed' ? colors.muted : colors.text;
   return <View accessible accessibilityLabel={`Partenza ${clock(departure.time)}, ${label}, ${departure.kind === 'live' ? 'previsione live' : 'orario programmato'}`}

@@ -497,6 +497,118 @@ class LineTests(unittest.TestCase):
         self.assertEqual(board['stops'][1]['vehiclesBefore'][0]['vehicleId'], '2641')
         self.assertFalse(board['stops'][2]['vehiclesBefore'])
 
+    def test_earlier_future_eta_cannot_rewind_reported_next_stop(self):
+        v, u = self.rome_forecast()
+        v.stop_id = 'c'; v.current_stop_sequence = 30
+        u.stop_time_update[0].arrival.time = self.now+30
+        u.stop_time_update[1].arrival.time = self.now+90
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        item = board['stops'][2]['vehiclesBefore'][0]
+        self.assertEqual(item['positionSource'], 'stop_id')
+        self.assertEqual(item['referenceStopIndex'], 2)
+
+    def test_moving_bus_is_departed_even_if_origin_prediction_is_still_in_future(self):
+        v = self.vehicle(self.feed('vehicles'), 'left-early', stop='b', sequence=20, status=pb.VehiclePosition.IN_TRANSIT_TO)
+        f = self.feed('updates'); e = f.entity.add(); e.id = 'late-origin-forecast'
+        u = e.trip_update; u.trip.CopyFrom(v.trip); u.vehicle.CopyFrom(v.vehicle); u.timestamp = self.now
+        event = u.stop_time_update.add(); event.stop_id = 'a'; event.departure.time = self.now+60
+        event = u.stop_time_update.add(); event.stop_id = 'b'; event.arrival.time = self.now+120
+        board = self.board()
+        self.assertFalse(board['stops'][0]['vehiclesBefore'])
+        self.assertTrue(board['stops'][1]['vehiclesBefore'])
+        departure = board['departures'][0]
+        self.assertEqual(departure['time'], self.now+60)
+        self.assertEqual(departure['kind'], 'live')
+        self.assertTrue(departure['departed'])
+        self.assertFalse(departure['atTerminus'])
+
+    def test_new_eta_cannot_rewind_measured_progress_on_same_journey(self):
+        v, u = self.rome_forecast()
+        v.stop_id = 'c'; v.current_stop_sequence = 30
+        original = self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'][0]
+        self.now += 10; v.timestamp = self.now; u.timestamp = self.now
+        v.stop_id = 'b'; v.current_stop_sequence = 20
+        u.stop_time_update[0].arrival.time = self.now+30
+        u.stop_time_update[1].arrival.time = self.now+90
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        item = board['stops'][2]['vehiclesBefore'][0]
+        self.assertTrue(item['retained'])
+        self.assertEqual(item['timestamp'], original['timestamp'])
+        # Repeated contradictory packets cannot revive the bus upstream.
+        self.now += 181; v.timestamp = self.now; u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now+30
+        u.stop_time_update[1].arrival.time = self.now+90
+        board = self.board('EUR FERMI (MB)')
+        self.assertTrue(all(not s['vehiclesBefore'] and not s['vehiclesAt'] for s in board['stops']))
+        v.stop_id = 'c'; v.current_stop_sequence = 30
+        self.feeds.pop('updates')
+        self.assertFalse(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'][0]['retained'])
+
+    def test_revised_forecast_cannot_cross_previously_reported_stop(self):
+        self.add_trip('four-stops', 36000, headsign='Quattro', stops=('a','b','c','d'))
+        v = self.vehicle(self.feed('vehicles'), 'bus', trip='four-stops', stop='c', sequence=30, status=pb.VehiclePosition.IN_TRANSIT_TO)
+        f = self.feed('updates'); e = f.entity.add(); e.id = 'forecast'
+        u = e.trip_update; u.trip.CopyFrom(v.trip); u.vehicle.CopyFrom(v.vehicle); u.timestamp = self.now
+        for stop, delta in [('c',-10),('d',30)]:
+            event = u.stop_time_update.add(); event.stop_id = stop; event.arrival.time = self.now+delta
+        original = self.board('Quattro')['stops'][3]['vehiclesBefore'][0]
+        self.assertEqual(original['positionSource'], 'predictions')
+        self.assertEqual(original['referenceStopIndex'], 2)
+        self.now += 10; v.timestamp = self.now; u.timestamp = self.now
+        v.stop_id = 'b'; v.current_stop_sequence = 20
+        u.ClearField('stop_time_update')
+        for stop, delta in [('b',30),('c',90),('d',150)]:
+            event = u.stop_time_update.add(); event.stop_id = stop; event.arrival.time = self.now+delta
+        board = self.board('Quattro')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        item = board['stops'][3]['vehiclesBefore'][0]
+        self.assertTrue(item['retained'])
+        self.assertEqual(item['predictionTimestamp'], original['predictionTimestamp'])
+
+    def test_omitted_journey_fields_do_not_reset_progress_but_a_new_date_does(self):
+        v = self.vehicle(self.feed('vehicles'), 'bus', stop='b', sequence=20)
+        v.trip.start_date = '20261030'; v.trip.start_time = '10:00:00'
+        original = self.board()['stops'][1]['vehiclesAt'][0]
+        self.now += 10; v.timestamp = self.now
+        v.trip.ClearField('start_date'); v.trip.ClearField('start_time')
+        v.stop_id = 'a'; v.current_stop_sequence = 10
+        board = self.board()
+        self.assertFalse(board['stops'][0]['vehiclesAt'])
+        self.assertEqual(board['stops'][1]['vehiclesAt'][0]['timestamp'], original['timestamp'])
+        v.trip.start_date = '20261031'
+        self.assertFalse(self.board()['stops'][0]['vehiclesAt'][0]['retained'])
+
+    def test_equal_timestamp_revision_cannot_rewind_an_estimated_marker(self):
+        _, u = self.rome_forecast()
+        original = self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'][0]
+        self.now += 1
+        u.stop_time_update[0].arrival.time = self.now+30
+        u.stop_time_update[1].arrival.time = self.now+90
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        self.assertEqual(board['stops'][2]['vehiclesBefore'][0]['predictionTimestamp'], original['predictionTimestamp'])
+
+    def test_intermediate_estimate_does_not_forget_previously_reported_progress(self):
+        v, u = self.rome_forecast()
+        v.stop_id = 'c'; v.current_stop_sequence = 30
+        self.assertEqual(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'][0]['positionSource'], 'stop_id')
+        self.now += 10; v.timestamp = u.timestamp = self.now
+        v.stop_id = 'b'; v.current_stop_sequence = 20
+        u.stop_time_update[0].arrival.time = self.now-5
+        u.stop_time_update[1].arrival.time = self.now+30
+        intermediate = self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'][0]
+        self.assertEqual(intermediate['positionSource'], 'predictions')
+        self.now += 10; v.timestamp = u.timestamp = self.now
+        u.stop_time_update[0].arrival.time = self.now+30
+        u.stop_time_update[1].arrival.time = self.now+90
+        board = self.board('EUR FERMI (MB)')
+        self.assertFalse(board['stops'][1]['vehiclesBefore'])
+        item = board['stops'][2]['vehiclesBefore'][0]
+        self.assertTrue(item['retained'])
+        self.assertEqual(item['predictionTimestamp'], intermediate['predictionTimestamp'])
+
     def test_newer_delayed_arrival_corrects_a_previous_forecast_that_was_too_far_ahead(self):
         _, u = self.rome_forecast()
         self.assertTrue(self.board('EUR FERMI (MB)')['stops'][2]['vehiclesBefore'])

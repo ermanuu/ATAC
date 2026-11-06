@@ -28,12 +28,14 @@ export function groupDeparturesByHour(departures: Departure[]) {
 export function departureState(departure: Departure, now: number) {
   const age = now - (departure.positionTimestamp || 0);
   const positioned = age >= 0 && age <= 90;
+  if (positioned && departure.departed) return 'departed';
   if (positioned && departure.atTerminus) return 'terminal';
-  if ((positioned && departure.departed) || departure.time < now) return 'departed';
+  if (departure.time < now) return 'departed';
   return departure.kind === 'live' ? 'live' : 'scheduled';
 }
 
 export function departureLabel(departure: Departure, now: number) {
+  if (departureState(departure, now) === 'departed') return 'Partito';
   if (departure.kind === 'live') return 'LIVE';
-  return departureState(departure, now) === 'departed' ? 'Partito' : 'Program.';
+  return 'Program.';
 }

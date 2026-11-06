@@ -114,9 +114,11 @@ def next_arrival(vehicle, trip, stops, start, now, live, windows):
             if index >= start and arrival is not None and now - 180 <= arrival < now:
                 advance(index if departure > now else min(index + 1, len(stops) - 1))
 
-        # A fresh ETA that is still in the future is an upper bound, including
-        # when GPS projection or an earlier forecast placed this bus too far on.
+        # A future ETA can correct estimated progress, but cannot put the bus
+        # before the next stop already reported by its vehicle position.
         for index, prediction in predictions.items():
+            if index < start:
+                continue
             arrival = prediction.get('arrival', prediction.get('departure'))
             departure = prediction.get('departure', arrival)
             if arrival is not None and (now <= arrival <= now + 600 or

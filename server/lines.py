@@ -321,6 +321,7 @@ def place_vehicles(group, groups, sequences, now, live, updates=None, windows=()
                 'status': pb.VehiclePosition.VehicleStopStatus.Name(vehicle.current_status),
                 'estimated': estimated, 'placement': placement, 'positionSource': source,
                 'predictionTimestamp': prediction_timestamp, 'referenceStopId': vehicle.stop_id or None,
+                'referenceStopIndex': reference_index,
                 'upcomingStopIndex': forecast.upcoming if forecast else None,
                 'upcomingTimestamp': forecast.timestamp if forecast and forecast.upcoming is not None else None,
                 'retained': entity.id in live.get('retained', ()) or now - timestamp > 90 or not live['available'],

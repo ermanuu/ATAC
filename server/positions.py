@@ -73,20 +73,30 @@ class MarkerHistory:
         if not journey[0]:
             return (index, item) if index is not None else None
         key = (*board, item['id'])
+        reference = item.get('referenceStopIndex')
+        observed_progress = (reference, item['status'] == 'STOPPED_AT') if reference is not None else (-1, False)
         with self.lock:
             if now - self.last_cleanup >= 60:
                 self.entries = {k: v for k, v in self.entries.items() if now - v[3] <= 21600}
                 self.last_cleanup = now
             previous = self.entries.get(key)
-            if previous and previous[0] == journey:
-                _, old_index, old_item, _ = previous
+            same_journey = (previous and previous[0][0] == journey[0] and all(
+                not before or not after or before == after for before, after in zip(previous[0][1:], journey[1:])))
+            if same_journey:
+                # An omitted service date/start time does not identify a new run.
+                journey = tuple(after or before for before, after in zip(previous[0], journey))
+                _, old_index, old_item, _, recorded_progress = previous
                 old_progress = (old_index, old_item['placement'] == 'at')
                 progress = (index, item['placement'] == 'at') if index is not None else None
                 evidence = lambda value: max(value['timestamp'], value.get('predictionTimestamp') or 0)
                 bound, stamp = item.get('upcomingStopIndex'), item.get('upcomingTimestamp')
-                corrected_forecast = (index is not None and bound is not None and old_index > bound and
+                # A revised ETA may correct an earlier estimate, but cannot
+                # undo progress already reported by the vehicle itself.
+                corrected_forecast = (old_item['positionSource'] == 'predictions' and
+                                      progress is not None and progress >= recorded_progress and
+                                      bound is not None and old_index > bound and
                                       stamp is not None and 0 <= now - stamp <= 180 and
-                                      stamp >= (old_item.get('upcomingTimestamp') or old_item.get('predictionTimestamp') or 0))
+                                      stamp > (old_item.get('upcomingTimestamp') or old_item.get('predictionTimestamp') or 0))
                 incoming_forecast = item.get('upcomingTimestamp') or item.get('predictionTimestamp')
                 previous_forecast = old_item.get('upcomingTimestamp') or old_item.get('predictionTimestamp')
                 older_forecast = incoming_forecast is not None and previous_forecast is not None and incoming_forecast < previous_forecast
@@ -95,7 +105,7 @@ class MarkerHistory:
                     # into backward travel. Keep the original timestamps, and
                     # remember progress even after the icon expires so repeated
                     # bad packets cannot revive it at an already passed stop.
-                    self.entries[key] = (journey, old_index, old_item, now)
+                    self.entries[key] = (journey, old_index, old_item, now, recorded_progress)
                     prediction = old_item.get('predictionTimestamp')
                     if 0 <= now - old_item['timestamp'] <= 180 and (
                         old_item['positionSource'] != 'predictions' or
@@ -103,7 +113,8 @@ class MarkerHistory:
                     ):
                         return old_index, old_item | {'retained': True}
                     return None
+                observed_progress = max(observed_progress, recorded_progress)
             if index is None:
                 return None
-            self.entries[key] = (journey, index, item.copy(), now)
+            self.entries[key] = (journey, index, item.copy(), now, observed_progress)
             return index, item
