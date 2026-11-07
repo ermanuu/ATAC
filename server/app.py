@@ -54,6 +54,10 @@ def prepare_api(path):
     if parts == ['api', 'status']:
         key = ('status',)
         build = lambda: transit.status(**options)
+    elif parts in (['api', 'metro'], ['api', 'news']):
+        from . import infomobility
+        key, live = (parts[1], refresh), False
+        build = lambda: getattr(infomobility, parts[1])(**options)
     elif parts == ['api', 'routes']:
         key, live, ttl = ('routes', query('q')), False, 60
         build = lambda: transit.routes(query('q'))
@@ -65,6 +69,10 @@ def prepare_api(path):
         key, live, ttl = ('departures', parts[2], query('variant'), query('date')), False, 60
         schedule_options = options | ({'date': query('date')} if query('date') else {})
         build = lambda: daily_departures(parts[2], query('variant'), **schedule_options)
+    elif len(parts) == 4 and parts[:2] == ['api', 'routes'] and parts[3] == 'alerts':
+        from .infomobility import line_alerts
+        key, live = ('line-alerts', parts[2], refresh), False
+        build = lambda: line_alerts(parts[2], **options)
     elif parts == ['api', 'stops']:
         key, live, ttl = ('stops', query('q')), False, 60
         build = lambda: transit.stops(query('q')) if len(query('q')) >= 2 else []

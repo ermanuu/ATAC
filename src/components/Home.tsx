@@ -78,9 +78,9 @@ export function Home() {
     </GlassSurface>
 
     <View style={s.actions}>
-      {([['lines', 'Cerca linea'], ['stops', 'Cerca fermata']] as const).map(([kind, label]) => <View style={s.actionSlot} key={kind}>
-        <GlassPressable floating accessibilityRole="button" accessibilityLabel={label} onPress={() => router.push(kind === 'lines' ? '/lines' : '/stops')} style={s.action}>
-          <NavIcon kind={kind} active /><Text style={s.actionText}>{label}</Text>
+      {([['lines', 'Cerca linea', '/lines'], ['stops', 'Cerca fermata', '/stops'], ['metro', 'Metro', '/metro'], ['news', 'News', '/news']] as const).map(([kind, label, path]) => <View style={s.actionSlot} key={kind}>
+        <GlassPressable floating accessibilityRole="button" accessibilityLabel={label} onPress={() => router.push(path)} style={s.action}>
+          <NavIcon kind={kind} active /><View style={s.actionLabel}><Text style={s.actionText}>{label}</Text>{kind === 'metro' && <Text style={s.actionHint}>Stato delle linee</Text>}{kind === 'news' && <Text style={s.actionHint}>Da Roma Mobilità</Text>}</View>
         </GlassPressable>
       </View>)}
     </View>
@@ -108,7 +108,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   caption: { ...typography.caption, color: colors.muted }, recentLines: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }, recentLine: { borderRadius: 12 },
   featureFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: colors.border, minHeight: 44, marginTop: 'auto', gap: 10 },
   favorite: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 58, paddingVertical: 8 }, favoriteLabel: { flex: 1, minWidth: 0, gap: 2 }, favoriteName: { ...typography.label, color: colors.text },
-  actions: { flexDirection: 'row', gap: 12 }, actionSlot: { flex: 1, minWidth: 0 }, action: { minHeight: 94, padding: 14, gap: 12, alignItems: 'flex-start', justifyContent: 'center', borderRadius: 18 }, actionText: { ...typography.label, color: colors.text, fontWeight: '700' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 }, actionSlot: { flexBasis: '46%', flexGrow: 1, minWidth: 0 }, action: { minHeight: 106, padding: 14, gap: 12, alignItems: 'flex-start', justifyContent: 'center', borderRadius: 18 }, actionText: { ...typography.label, color: colors.text, fontWeight: '700' }, actionLabel: { gap: 2 }, actionHint: { ...typography.micro, color: colors.muted },
   planner: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, paddingHorizontal: 2, minHeight: 44 }, plannerText: { ...typography.caption, color: colors.muted }, coming: { ...typography.micro, color: colors.muted, marginLeft: 'auto', borderWidth: 1, borderColor: colors.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
   footer: { marginTop: 'auto', paddingTop: 10, gap: 14 }, disclaimer: { ...typography.micro, color: colors.muted },
   settings: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 50, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16 }, settingsText: { ...typography.label, color: colors.text, flex: 1 }, arrow: { fontSize: 24, lineHeight: 28, color: colors.accent },

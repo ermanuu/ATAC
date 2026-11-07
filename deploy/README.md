@@ -35,6 +35,8 @@ Per i successivi aggiornamenti del codice basta il consueto comando:
 sudo aggiorna-romabus
 ```
 
+Metro e segnalazioni consultano il feed RSS pubblico `https://www.atac.roma.it/feeds/stato-del-servizio-in-tempo-reale`; News consulta `https://romamobilita.it/wp-json/wp/v2/infomobilita` e `https://romamobilita.it/wp-json/wp/v2/primo-piano`. La VM deve poter raggiungere in HTTPS `www.atac.roma.it` e `romamobilita.it`. Non servono token o nuove dipendenze. Le API `/api/metro` e `/api/news` permettono di verificare le fonti anche senza un database GTFS importato. Una fonte irraggiungibile è segnalata nelle pagine interessate e non blocca posizioni, partenze e arrivi dei bus.
+
 Lo script installato aggiorna anche le unità systemd prima di riavviare il sito.
 
 ## Verifica ed esecuzione manuale

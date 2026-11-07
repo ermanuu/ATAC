@@ -13,6 +13,7 @@ import { layout, typography } from '../ui/design';
 import { UpdateStatus } from '../ui/UpdateStatus';
 import { DepartureTile } from './DepartureTile';
 import { CourseSummary } from './CourseSummary';
+import { LineAlerts } from './LineAlerts';
 
 const BUS_ICON = require('../../assets/bus-front.png');
 
@@ -32,6 +33,7 @@ export function RouteDirections() {
     {state.data && <>
       <View style={s.row}><Badge name={state.data.route.name} /><Text accessibilityRole="header" style={s.title}>Scegli la direzione</Text></View>
       <Text style={s.muted}>Verso quale capolinea vuoi andare?</Text>
+      <LineAlerts key={id} routeId={id} />
       {!state.data.variants.length && <Notice text="Nessuna direzione in servizio ora o in partenza nei prossimi 90 minuti." />}
       {state.data.variants.map(variant => <GlassPressable accessibilityRole="button" accessibilityLabel={`Direzione ${variant.headsign}, da ${variant.fromName}`} key={variant.id}
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
@@ -97,6 +99,7 @@ export function RouteTimeline() {
   return <View style={s.stack}>
     <RequestState state={state} showLoading={!data} />
     {data && <>
+      <LineAlerts key={id} routeId={id} />
       <GlassPressable accessibilityRole="button" accessibilityLabel={`Partenze da ${data.selectedVariant.fromName}, apri tutte le partenze della giornata`} style={s.departureStrip}
         onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id, variant } })}>
         <View style={s.departureHeader}><Text numberOfLines={1} style={s.departureLabel}>Partenze da {data.selectedVariant.fromName}</Text><Text style={s.departureLink}>Tutte ›</Text></View>

@@ -128,11 +128,12 @@ function AppShell() {
   const home = pathname === '/';
   const lineDetail = pathname.startsWith('/line/');
   const departurePage = lineDetail && pathname.endsWith('/departures');
+  const infoPage = pathname === '/metro' || pathname === '/news';
   const stopDetail = pathname.startsWith('/stop/') || (pathname === '/stops' && Boolean(params.stopId));
   const board = lineDetail && !departurePage && Boolean(params.id && params.variant);
   const lineTitle = title && title.routeId === params.id && title.variant === params.variant ? `${title.line}-${title.direction.toLocaleUpperCase('it-IT')}` : '';
   const detailRefreshing = refreshing || Boolean(board && lineTitle && title?.updating);
-  const tab = stopDetail || pathname === '/stops' ? 'stops' : pathname === '/settings' ? 'settings' : pathname === '/plan' ? 'plan' : 'lines';
+  const tab = infoPage ? null : stopDetail || pathname === '/stops' ? 'stops' : pathname === '/settings' ? 'settings' : pathname === '/plan' ? 'plan' : 'lines';
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [pathname, params.stopId]);
   const returnToSearch = () => router.replace({ pathname: '/lines', params: { focus: '1' } });
   const returnFromStop = () => {
@@ -159,9 +160,9 @@ function AppShell() {
     <View style={[s.content, home && s.homeContent]}><ScrollView ref={scroll} alwaysBounceVertical refreshControl={stopDetail ? undefined : <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />} keyboardShouldPersistTaps="handled" contentContainerStyle={home ? s.homeScroll : [s.scroll, board && s.boardScroll, lineDetail && !board && !departurePage && s.directionScroll]}>
       <Slot />
     </ScrollView></View>
-    {(board || stopDetail || departurePage) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { right: Math.max(layout.gutter, (width-layout.maxWidth)/2+layout.gutter), bottom: 96 + Math.max(insets.bottom, 12) }]}>
-      <GlassPressable floating accessibilityRole="button" accessibilityLabel={departurePage ? 'Aggiorna partenze della giornata' : stopDetail ? 'Aggiorna arrivi della fermata' : 'Aggiorna fermate della linea'} aria-busy={detailRefreshing} accessibilityState={{ busy: detailRefreshing, disabled: detailRefreshing }} disabled={detailRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
-        {detailRefreshing ? <ActivityIndicator accessibilityLabel={stopDetail ? 'Aggiornamento arrivi in corso' : 'Aggiornamento fermate in corso'} color={colors.onAccent} /> : <Text style={s.lineRefreshIcon}>↻</Text>}
+    {(board || stopDetail || departurePage || infoPage) && <View pointerEvents="box-none" style={[s.lineRefreshDock, { right: Math.max(layout.gutter, (width-layout.maxWidth)/2+layout.gutter), bottom: 96 + Math.max(insets.bottom, 12) }]}>
+      <GlassPressable floating accessibilityRole="button" accessibilityLabel={departurePage ? 'Aggiorna partenze della giornata' : pathname === '/metro' ? 'Aggiorna stato metro' : pathname === '/news' ? 'Aggiorna notizie' : stopDetail ? 'Aggiorna arrivi della fermata' : 'Aggiorna fermate della linea'} aria-busy={detailRefreshing} accessibilityState={{ busy: detailRefreshing, disabled: detailRefreshing }} disabled={detailRefreshing} onPress={() => { void refresh(); }} style={s.lineRefreshButton}>
+        {detailRefreshing ? <ActivityIndicator accessibilityLabel={pathname === '/metro' ? 'Aggiornamento stato metro' : pathname === '/news' ? 'Aggiornamento notizie' : stopDetail ? 'Aggiornamento arrivi in corso' : 'Aggiornamento fermate in corso'} color={colors.onAccent} /> : <Text style={s.lineRefreshIcon}>↻</Text>}
       </GlassPressable>
     </View>}
     {!home && <View pointerEvents="box-none" style={[s.bottomDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
