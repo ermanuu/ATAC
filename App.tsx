@@ -9,11 +9,12 @@ import { UpdateStatus } from './src/ui/UpdateStatus';
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/Theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
+import { useLiveClock } from './src/lib/useLiveClock';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { Slot, router, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
+import { Slot, router, useFocusEffect, usePathname, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
 
 const ROMABUS_LOGO = require('./assets/bus-front.png');
 const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
@@ -54,14 +55,15 @@ export function useData<T>(path: string | null, interval = 0, retainWhileLoading
   const { register } = useRefresh();
   const loader = useRef<(force?: boolean) => Promise<void>>(async () => {});
   const retry = useCallback(() => loader.current(true), []);
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     setData(null); setError(''); setLoading(false);
     if (!path) return;
     let controller: AbortController | undefined;
     let pending: Promise<void> | null = null;
     let disposed = false;
+    let foreground = AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
     const load = (force = false): Promise<void> => {
-      if (disposed) return Promise.resolve();
+      if (disposed || (interval > 0 && !foreground)) return Promise.resolve();
       // Finish slow polls; an explicit refresh then fetches a new source snapshot.
       if (pending) return force ? pending.then(() => load(true)) : pending;
       controller = new AbortController(); const signal = controller.signal;
@@ -75,11 +77,23 @@ export function useData<T>(path: string | null, interval = 0, retainWhileLoading
     loader.current = load;
     const unregister = register(load);
     // Returning from a stop must not reuse an older line snapshot from the cache.
-    const delay = setTimeout(() => { void load(Boolean(interval)); }, 250);
-    const timer = interval ? setInterval(() => { void load(); }, interval) : undefined;
-    const listener = AppState.addEventListener('change', state => { if (state === 'active') void load(true); });
-    return () => { disposed = true; unregister(); controller?.abort(); clearTimeout(delay); if (timer) clearInterval(timer); listener.remove(); };
-  }, [path, interval, retainWhileLoading, register]);
+    let delay: ReturnType<typeof setTimeout> | undefined = setTimeout(() => { delay = undefined; void load(Boolean(interval)); }, 250);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stopPolling = () => { if (timer) { clearInterval(timer); timer = undefined; } };
+    const startPolling = () => { stopPolling(); if (interval > 0 && foreground) timer = setInterval(() => { void load(); }, interval); };
+    startPolling();
+    // Only live screens resume polling when the app returns to the foreground.
+    const listener = interval > 0 ? AppState.addEventListener('change', state => {
+      const wasForeground = foreground;
+      foreground = state === 'active';
+      if (!foreground) { stopPolling(); controller?.abort(); }
+      else if (!wasForeground) {
+        if (delay) { clearTimeout(delay); delay = undefined; }
+        startPolling(); void load(true);
+      }
+    }) : undefined;
+    return () => { disposed = true; unregister(); controller?.abort(); if (delay) clearTimeout(delay); stopPolling(); listener?.remove(); };
+  }, [path, interval, retainWhileLoading, register]));
   return { data, error, loading, retry, receivedAt };
 }
 
@@ -165,7 +179,7 @@ function AppShell() {
 export function Home() {
   const { s, colors } = useStyles();
   const insets = useSafeAreaInsets();
-  const state = useData<Health>('status', 10000);
+  const state = useData<Health>('status', 0, true);
   const live = state.data?.vehicles.available && state.data?.updates.available;
   return <View style={[s.home, { paddingBottom: Math.max(insets.bottom, 16) }]}>
     <View style={s.homeHeader}>
@@ -261,11 +275,7 @@ export function Stops() {
     if (params.stopId && params.stopName) setStop({ stop_id: params.stopId, name: params.stopName });
   }, [params.stopId, params.stopName]);
   const state = useData<Arrivals>(stop ? `stops/${encodeURIComponent(stop.stop_id)}/arrivals` : null, 10000, true);
-  const [tick, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
-    return () => clearInterval(timer);
-  }, []);
+  const tick = useLiveClock(Boolean(stop));
   const now = Math.max(tick, state.receivedAt);
   const navigation = useRef<AbortController | null>(null);
   const [openingRoute, setOpeningRoute] = useState<string | null>(null);

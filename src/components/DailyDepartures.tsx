@@ -6,6 +6,7 @@ import { calendarDateOffset, nightDescription, scheduledTimetableSections, type 
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import { useTheme } from '../ui/Theme';
 import { layout, typography } from '../ui/design';
+import { CourseSummary } from './CourseSummary';
 
 type Timetable = {
   route: Route;
@@ -37,9 +38,8 @@ export function DailyDepartures() {
     {data && <>
       <View style={styles.row}>
         <Badge name={data.route.name} /><View style={styles.details}>
-          <Text style={[typography.label, { color: colors.text }]}>Da {data.selectedVariant.fromName}</Text>
-          <Text style={[typography.caption, { color: colors.muted }]}>Verso {data.selectedVariant.headsign}</Text>
-          {data.selectedVariant.category && data.selectedVariant.category !== 'Ordinaria' && <Text style={[typography.caption, { color: colors.muted }]}>{data.selectedVariant.category}{data.selectedVariant.pathNote ? ` · ${data.selectedVariant.pathNote}` : ''}</Text>}
+          <CourseSummary course={data.selectedVariant} />
+          {data.selectedVariant.pathNote && <Text style={[typography.caption, { color: colors.muted }]}>{data.selectedVariant.pathNote}</Text>}
         </View>
       </View>
       <View style={styles.row}>

@@ -6,11 +6,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Badge, Notice, RequestState, clock, useData, type Route } from '../../App';
 import { visibleVehicles } from '../lib/vehicles';
+import { useLiveClock } from '../lib/useLiveClock';
 import { visibleDepartures, type Departure } from '../lib/departures';
 import { useTheme, type ThemeColors } from '../ui/Theme';
 import { layout, typography } from '../ui/design';
 import { UpdateStatus } from '../ui/UpdateStatus';
 import { DepartureTile } from './DepartureTile';
+import { CourseSummary } from './CourseSummary';
 
 const BUS_ICON = require('../../assets/bus-front.png');
 
@@ -33,7 +35,7 @@ export function RouteDirections() {
       {!state.data.variants.length && <Notice text="Nessuna direzione in servizio ora o in partenza nei prossimi 90 minuti." />}
       {state.data.variants.map(variant => <GlassPressable accessibilityRole="button" accessibilityLabel={`Direzione ${variant.headsign}, da ${variant.fromName}`} key={variant.id}
         style={s.direction} onPress={() => router.push({ pathname: '/line/[id]/[variant]', params: { id, variant: variant.id } })}>
-        <View style={s.flex}><Text style={s.kicker}>DIREZIONE</Text><Text style={s.directionName}>{variant.headsign}</Text>{variant.category && variant.category !== 'Ordinaria' && <Text style={s.small}>{variant.category}</Text>}<Text style={s.muted}>Da {variant.fromName}</Text><Text style={s.small}>{variant.stopCount} fermate</Text></View><Text style={s.chevron}>›</Text>
+        <CourseSummary course={variant} /><Text style={s.chevron}>›</Text>
       </GlassPressable>)}
       {inactiveVariants.length > 0 && <InactiveDirections key={id} routeId={id} variants={inactiveVariants} />}
     </>}
@@ -44,7 +46,8 @@ function InactiveDirections({ routeId, variants }: { routeId: string; variants: 
   const { s } = useStyles();
   const [inactiveOpen, setInactiveOpen] = useState(false);
   const groups = new Map<string, Variant[]>();
-  for (const variant of variants) {
+  const ordinary = (variant: Variant) => variant.category?.trim().toLocaleLowerCase('it-IT') === 'ordinaria';
+  for (const variant of [...variants].sort((a, b) => Number(ordinary(b)) - Number(ordinary(a)))) {
     const category = variant.category || 'Altre varianti';
     groups.set(category, [...(groups.get(category) || []), variant]);
   }
@@ -55,7 +58,7 @@ function InactiveDirections({ routeId, variants }: { routeId: string; variants: 
         </Pressable>
         {inactiveOpen && <View style={s.inactiveList}>{[...groups].flatMap(([category, variants]) => variants.map(variant => <GlassPressable key={variant.id} accessibilityRole="button" accessibilityLabel={`Consulta orari verso ${variant.headsign}, da ${variant.fromName}, ${category}`} style={s.inactiveDirection}
             onPress={() => router.push({ pathname: '/line/[id]/departures', params: { id: routeId, variant: variant.id, fromDirections: '1' } })}>
-            <View style={[s.flex, s.inactiveDetails]}><Text style={s.inactiveName}>{variant.headsign}</Text><Text style={s.inactiveCategory}>{category}</Text><Text style={s.small}>Da {variant.fromName}</Text></View><Text style={s.inactiveArrow}>›</Text>
+            <CourseSummary course={variant} compact /><Text style={s.inactiveArrow}>›</Text>
           </GlassPressable>))}</View>}
       </View>;
 }
@@ -77,11 +80,7 @@ export function RouteTimeline() {
   const { id, variant } = useLocalSearchParams<{ id: string; variant: string }>();
   const state = useData<Board>(id && variant ? `routes/${encodeURIComponent(id)}?variant=${encodeURIComponent(variant)}` : null, 10000, true);
   const [vehicleInfo, setVehicleInfo] = useState<{ id: string; stopName: string } | null>(null);
-  const [tick, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now() / 1000), 10000);
-    return () => clearInterval(timer);
-  }, []);
+  const tick = useLiveClock();
   const now = Math.max(tick, state.receivedAt);
   const data = state.data;
   useEffect(() => { if (data) publish({ routeId: id, variant, line: data.route.name, direction: data.selectedVariant.headsign, updating: state.loading }); }, [data, id, variant, publish, state.loading]);
@@ -148,13 +147,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   directionPage: { flexGrow: 1 },
   inactiveSection: { marginTop: 'auto', paddingTop: 28, gap: 12 }, inactiveHeading: { ...typography.body, color: colors.muted, fontWeight: '700' },
   inactiveToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, gap: 12 }, inactiveTogglePressed: { opacity: 0.7 }, inactiveCaret: { color: colors.muted, fontSize: 24, lineHeight: 28 }, inactiveList: { gap: 12 },
-  inactiveDetails: { gap: 2 }, inactiveCategory: { ...typography.caption, color: colors.muted, fontWeight: '600' },
   inactiveDirection: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, backgroundColor: colors.surfaceAlt, minHeight: 64 },
-  inactiveName: { ...typography.body, color: colors.muted, fontWeight: '600' }, inactiveArrow: { fontSize: 22, color: colors.muted },
+  inactiveArrow: { fontSize: 22, color: colors.muted },
   title: { ...typography.title, color: colors.text, flexShrink: 1 },
   heading: { ...typography.heading, color: colors.text, flexShrink: 1 }, muted: { ...typography.body, color: colors.muted }, small: { ...typography.caption, color: colors.muted },
-  kicker: { ...typography.micro, color: colors.accent, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4 },
-  direction: { flexDirection: 'row', alignItems: 'center', padding: layout.cardPadding, borderRadius: layout.radius, gap: 12 }, directionName: { ...typography.heading, color: colors.text, marginBottom: 8 }, chevron: { color: colors.accent, fontSize: 28 },
+  direction: { flexDirection: 'row', alignItems: 'center', padding: layout.cardPadding, borderRadius: layout.radius, gap: 12 }, chevron: { color: colors.accent, fontSize: 28 },
   departureStrip: { gap: 8, borderRadius: layout.radius, padding: 12 },
   departureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   departureLabel: { ...typography.caption, flex: 1, color: colors.muted, fontWeight: '600' }, departureLink: { ...typography.caption, color: colors.accent, fontWeight: '700' },
