@@ -7,6 +7,7 @@ import { feedState, realtimeState, type FeedState, type RealtimeStatus } from '.
 import { GlassPressable, GlassSurface } from '../ui/Glass';
 import { useTheme, type ThemeColors } from '../ui/Theme';
 import { ThemePicker } from './ThemePicker';
+import { HomeContentPicker } from './HomeContentPicker';
 import { layout, typography } from '../ui/design';
 
 const feedLabels: Record<FeedState, string> = { available: 'Disponibile', unavailable: 'Non disponibile', stale: 'Dati non aggiornati', unknown: 'Da verificare' };
@@ -30,6 +31,11 @@ export function Settings() {
     <GlassSurface style={s.section}>
       <Text accessibilityRole="header" style={s.heading}>Aspetto</Text>
       <ThemePicker />
+    </GlassSurface>
+
+    <GlassSurface style={s.section}>
+      <Text accessibilityRole="header" style={s.heading}>Home</Text>
+      <HomeContentPicker />
     </GlassSurface>
 
     <GlassSurface style={s.section}>

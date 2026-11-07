@@ -10,6 +10,9 @@ import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/Theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveArrivalDestination } from './src/lib/resolveArrival';
 import { useLiveClock } from './src/lib/useLiveClock';
+import { HomePreferencesProvider, useHomePreferences } from './src/lib/HomePreferences';
+import { lineKey, type RecentLine } from './src/lib/recentLines';
+export { Home } from './src/components/Home';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,8 +22,7 @@ import { Slot, router, useFocusEffect, usePathname, useLocalSearchParams, useGlo
 const ROMABUS_LOGO = require('./assets/bus-front.png');
 const API = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 export type Stop = { stop_id: string; name: string };
-export type Route = { route_id: string; name: string; description: string };
-type Health = { vehicles: { available: boolean }; updates: { available: boolean } };
+export type Route = RecentLine;
 type Arrivals = { apiVersion?: number; arrivals: Arrival[]; liveAvailable: boolean; timestamp: number | null };
 export async function api<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
   if (!API && Platform.OS !== 'web') throw new Error('Configura EXPO_PUBLIC_API_URL con l’indirizzo del servizio dati raggiungibile dall’iPhone.');
@@ -112,7 +114,7 @@ function StopSearch({ label, selected, onSelect }: { label: string; selected: St
     {!selected && state.data?.map(stop => <GlassPressable accessibilityRole="button" key={stop.stop_id} style={s.stop} onPress={() => onSelect(stop)}><Text style={s.body}>{stop.name}</Text><Text style={s.small}>Fermata {stop.stop_id}</Text></GlassPressable>)}
   </View>;
 }
-export default function App() { return <ThemeProvider><RefreshProvider><LineHeaderProvider><AppShell /></LineHeaderProvider></RefreshProvider></ThemeProvider>; }
+export default function App() { return <ThemeProvider><HomePreferencesProvider><RefreshProvider><LineHeaderProvider><AppShell /></LineHeaderProvider></RefreshProvider></HomePreferencesProvider></ThemeProvider>; }
 function AppShell() {
   const { s, colors, scheme } = useStyles();
   const { title } = useLineHeader();
@@ -176,74 +178,57 @@ function AppShell() {
     </View>}
   </SafeAreaView></View>;
 }
-export function Home() {
-  const { s, colors } = useStyles();
-  const insets = useSafeAreaInsets();
-  const state = useData<Health>('status', 0, true);
-  const live = state.data?.vehicles.available && state.data?.updates.available;
-  return <View style={[s.home, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-    <View style={s.homeHeader}>
-      <Image source={ROMABUS_LOGO} resizeMode="contain" accessibilityLabel="Logo ROMABUS" style={[s.homeLogo, { tintColor: colors.accent }]} />
-      <Text style={s.eyebrow}>ROMABUS</Text>
-      <Text style={[s.livePill, { color: live ? colors.live : colors.muted }]}>{live ? '● Feed LIVE' : state.loading ? 'Verifica live…' : '● LIVE non disponibile'}</Text>
-      <Text style={s.homeTitle}>La città, in movimento.</Text>
-      <Text style={s.homeSubtitle}>Linee, fermate e percorsi a Roma</Text>
-    </View>
-    <View style={s.homeActions}>
-      {([['lines', 'Cerca linea'], ['stops', 'Cerca fermata'], ['plan', 'Calcola percorso']] as const).map(([kind, label]) => {
-        const content = <>
-          <View style={s.homeActionIcon}><NavIcon kind={kind} active={kind !== 'plan'} /></View>
-          <View style={s.homeActionLabel}><Text style={s.homeActionText}>{label}</Text>{kind === 'plan' && <Text style={s.homeActionHint}>Funzionalità in arrivo</Text>}</View>
-          {kind !== 'plan' && <Text style={s.arrow}>›</Text>}
-        </>;
-        return kind === 'plan'
-          ? <GlassSurface key={kind} accessible accessibilityRole="button" accessibilityLabel="Calcola percorso, funzionalità in arrivo" aria-disabled accessibilityState={{ disabled: true }} style={[s.homeAction, s.homeActionUnavailable]}>{content}</GlassSurface>
-          : <GlassPressable floating key={kind} accessibilityRole="button" style={s.homeAction} onPress={() => router.push(kind === 'lines' ? '/lines' : '/stops')}>{content}</GlassPressable>;
-      })}
-    </View>
-    <View style={s.homeSettingsDock}>
-      <Text style={s.homeDisclaimer}>Il presente è un progetto indipendente.{'\n'}NON è affiliato, autorizzato o connesso ad ATAC S.p.A. e/o Roma Servizi per la Mobilità.{'\n'}I dati in tempo reale sono open source e forniti ufficialmente da Roma Servizi per la Mobilità.</Text>
-      <GlassPressable accessibilityRole="button" accessibilityLabel="Apri impostazioni" onPress={() => router.push('/settings')} style={s.homeSettings}>
-        <NavIcon kind="settings" active /><Text style={s.homeSettingsText}>Impostazioni</Text><Text style={s.arrow}>›</Text>
-      </GlassPressable>
-    </View>
-  </View>;
+// Recent route IDs may change after a GTFS import; resolve them by public line name.
+export function useOpenLine(knownRoutes?: Route[] | null) {
+  const { rememberLine } = useHomePreferences();
+  const known = useRef(knownRoutes);
+  known.current = knownRoutes;
+  const navigation = useRef<AbortController | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState('');
+  useFocusEffect(useCallback(() => {
+    setOpening(false); setError('');
+    return () => { navigation.current?.abort(); navigation.current = null; };
+  }, []));
+  const openLine = useCallback(async (candidate: Route) => {
+    if (navigation.current) return;
+    const controller = new AbortController();
+    navigation.current = controller;
+    setError(''); setOpening(true);
+    try {
+      let route = known.current?.find(item => lineKey(item.name) === lineKey(candidate.name));
+      if (!route) {
+        const matches = await api<Route[]>(`routes?q=${encodeURIComponent(candidate.name)}`, controller.signal);
+        route = matches.find(item => lineKey(item.name) === lineKey(candidate.name));
+      }
+      if (!route) throw new Error('Linea non presente negli orari attuali.');
+      if (controller.signal.aborted) return;
+      await rememberLine(route);
+      if (!controller.signal.aborted) router.push({ pathname: '/line/[id]', params: { id: route.route_id } });
+    } catch (error) {
+      if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Impossibile aprire la linea.');
+    } finally {
+      if (navigation.current === controller) {
+        navigation.current = null; setOpening(false);
+      }
+    }
+  }, [rememberLine]);
+  return { openLine, opening, error };
 }
 export function Lines() {
   const { s, colors, scheme } = useStyles();
   const { focus, query: initialQuery } = useLocalSearchParams<{ focus?: string; query?: string }>();
   const [query, setQuery] = useState(initialQuery || '');
   const state = useData<Route[]>(`routes?q=${encodeURIComponent(query)}`);
-  const [recent, setRecent] = useState<Route[]>([]);
-  useEffect(() => { let active = true; AsyncStorage.getItem('recent-lines').then(raw => {
-    const value: unknown = JSON.parse(raw || '[]');
-    if (active && Array.isArray(value)) setRecent(value.filter(r => typeof r?.route_id === 'string' && typeof r?.name === 'string').slice(0, 10));
-  }).catch(() => {}); return () => { active = false; }; }, []);
-  const [recentError, setRecentError] = useState('');
-  const [opening, setOpening] = useState(false);
-  const openLine = async (candidate: Route) => {
-    if (opening) return;
-    setRecentError(''); setOpening(true);
-    let route = candidate;
-    try {
-      if (!state.data?.some(r => r.route_id === candidate.route_id)) {
-        const matches = await api<Route[]>(`routes?q=${encodeURIComponent(candidate.name)}`);
-        const current = matches.find(r => r.name === candidate.name);
-        if (!current) throw new Error('Linea non presente negli orari attuali.');
-        route = current;
-      }
-    } catch (error) { setRecentError(error instanceof Error ? error.message : 'Impossibile aprire la linea.'); setOpening(false); return; }
-    const next = [route, ...recent.filter(r => r.name !== route.name)].slice(0, 10);
-    setRecent(next); void AsyncStorage.setItem('recent-lines', JSON.stringify(next)).catch(() => {});
-    setOpening(false); router.push({ pathname: '/line/[id]', params: { id: route.route_id } });
-  };
-  const rank = new Map(recent.map((r, i) => [r.name, i]));
+  const { recentLines: recent, historyError } = useHomePreferences();
+  const { openLine, opening, error } = useOpenLine(state.data);
+  const rank = new Map(recent.map((r, i) => [lineKey(r.name), i]));
   const results = [...(state.data || [])];
-  if (!query.trim() && state.data) for (const r of recent) if (!results.some(item => item.name === r.name)) results.push(r);
-  results.sort((a, b) => (rank.get(a.name) ?? 100) - (rank.get(b.name) ?? 100));
+  if (!query.trim() && state.data) for (const r of recent) if (!results.some(item => lineKey(item.name) === lineKey(r.name))) results.push(r);
+  results.sort((a, b) => (rank.get(lineKey(a.name)) ?? 100) - (rank.get(lineKey(b.name)) ?? 100));
   return <View style={s.stack}><Text accessibilityRole="header" style={s.pageTitle}>Cerca linea</Text><TextInput autoFocus={focus === '1'} accessibilityLabel="Cerca linea autobus" value={query} onChangeText={setQuery} placeholder="Es. 64, 40, H…" placeholderTextColor={colors.placeholder} keyboardAppearance={scheme} selectionColor={colors.accent} style={s.input} autoCorrect={false} /><RequestState state={state} />
     {state.data?.length === 0 && <Notice text="Nessuna linea trovata." />}
-    {!!recentError && <Notice text={recentError} />}
+    {!!(error || historyError) && <Notice text={error || historyError} />}
     {opening && <ActivityIndicator color={colors.accent} />}
     {results.map(r => <GlassPressable disabled={opening} accessibilityRole="button" key={r.route_id} style={s.route} onPress={() => openLine(r)}><Badge name={r.name} /><View style={s.flex}><Text style={s.body}>Linea {r.name}</Text><Text style={s.small}>Scegli la direzione →</Text></View><Text style={s.arrow}>›</Text></GlassPressable>)}
   </View>;
@@ -355,14 +340,12 @@ export function Planner() {
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background }, safeContent: { flex: 1 },
-  homeLogo: { width: 140, height: 84, alignSelf: 'center' }, launchScreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', gap: 8 }, launchLogo: { width: 180, height: 180 }, launchName: { color: colors.accent, fontWeight: '800', fontSize: 22, letterSpacing: 3, marginBottom: 24 },
+  launchScreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', gap: 8 }, launchLogo: { width: 180, height: 180 }, launchName: { color: colors.accent, fontWeight: '800', fontSize: 22, letterSpacing: 3, marginBottom: 24 },
   boardHeader: { minHeight: 64, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }, headerLeft: { width: 88 }, headerRight: { width: 88 }, boardAction: { minHeight: 48, borderRadius: 20, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' }, boardActionText: { ...typography.caption, color: colors.accent, fontWeight: '700', textAlign: 'center' }, boardTitle: { ...typography.label, flex: 1, textAlign: 'center', color: colors.text, fontWeight: '800' },
   fixedHeader: { minHeight: 64, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: layout.gutter, paddingVertical: 8, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', gap: 8, marginBottom: 8 },
   headerAction: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 20 }, headerReturn: { maxWidth: '100%' }, headerActionText: { ...typography.label, color: colors.accent, fontWeight: '700' },
-  homeContent: { paddingHorizontal: layout.gutter }, homeScroll: { flexGrow: 1 }, home: { flex: 1, gap: 24, width: '100%', maxWidth: 420, alignSelf: 'center', paddingTop: 12, paddingBottom: 36 }, homeHeader: { gap: 10, alignItems: 'center' }, homeActions: { gap: 12 }, eyebrow: { fontSize: 24, fontWeight: '800', color: colors.accent, letterSpacing: 3 }, homeTitle: { fontSize: 30, lineHeight: 36, fontWeight: '800', color: colors.text, marginTop: 6, letterSpacing: -1, textAlign: 'center' }, homeSubtitle: { ...typography.body, color: colors.muted, textAlign: 'center' }, flex: { flex: 1, minWidth: 0 }, stack: { gap: layout.gap },
+  homeContent: { paddingHorizontal: layout.gutter }, homeScroll: { flexGrow: 1 }, flex: { flex: 1, minWidth: 0 }, stack: { gap: layout.gap },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  livePill: { fontSize: 11, fontWeight: '600', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.surface, overflow: 'hidden' },
-  homeAction: { flexDirection: 'row', alignItems: 'center', padding: layout.cardPadding, gap: 14, borderRadius: layout.radius, minHeight: 78 }, homeActionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' }, homeActionText: { ...typography.body, color: colors.text, fontWeight: '700' },
   bottomDock: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 12 }, bottomBar: { flexDirection: 'row', borderRadius: 32, padding: 6, maxWidth: 460, width: '100%', alignSelf: 'center' },
   bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, borderRadius: 26, minHeight: 62 }, bottomTabActive: { backgroundColor: colors.accentSoft, boxShadow: 'none' }, bottomTabPressed: { backgroundColor: colors.pressed }, bottomTabText: { ...typography.micro, color: colors.muted, fontWeight: '600' }, bottomTabSelected: { color: colors.accent, fontWeight: '800' }, bottomTabUnavailable: { opacity: 0.5 },
   content: { flex: 1, width: '100%', maxWidth: layout.maxWidth, alignSelf: 'center', paddingHorizontal: layout.gutter }, scroll: { paddingBottom: 140, gap: layout.gap }, pageTitle: { ...typography.title, color: colors.text }, heading: { ...typography.heading, color: colors.text, flexShrink: 1 },
@@ -383,10 +366,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   notice: { padding: layout.cardPadding, borderRadius: layout.radius, marginVertical: 8 }, card: { borderRadius: layout.radius, padding: layout.cardPadding, gap: 12 },
   link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
   label: { ...typography.label, color: colors.text, fontWeight: '700' }, stop: { padding: layout.cardPadding, marginBottom: 8 },
-  homeActionLabel: { flex: 1, gap: 4 }, homeActionHint: { ...typography.caption, color: colors.muted }, homeActionUnavailable: { backgroundColor: colors.surfaceAlt },
-  homeSettingsDock: { marginTop: 'auto', gap: 16 }, homeDisclaimer: { ...typography.micro, color: colors.muted },
   comingSoon: { padding: layout.cardPadding, gap: layout.gap, alignItems: 'flex-start' }, comingSoonTitle: { ...typography.heading, color: colors.accent },
-  homeSettings: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: layout.cardPadding, paddingVertical: 12 }, homeSettingsText: { ...typography.body, flex: 1, color: colors.text, fontWeight: '600' },
 });
 
 function useStyles() {
