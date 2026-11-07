@@ -43,8 +43,7 @@ function MetroCard({ line, verified }: { line: MetroLine; verified: boolean }) {
       <View style={[s.metroBadge, { backgroundColor: badgeColor }]}><Text accessible={false} style={[s.metroCode, { color: line.code === 'A' ? '#211609' : '#ffffff' }]}>{line.code}</Text></View>
       <View style={s.flex}><Text accessibilityRole="header" style={s.metroName}>{line.name}</Text><View style={s.statusRow}><View accessible={false} style={[s.dot, { backgroundColor: color }]} /><Text style={[s.status, { color }]}>{verified ? line.label : 'Stato non verificabile'}</Text></View></View>
     </View>
-    {!!line.detail && <>
-      {!verified && <Text style={s.caption}>Ultima comunicazione disponibile</Text>}
+    {verified && !!line.detail && <>
       <Text numberOfLines={expanded ? undefined : 3} style={s.description}>{line.detail}</Text>
       {line.detail.length > 180 && <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? 'Nascondi' : 'Mostra'} dettaglio ${line.name}`} accessibilityState={{ expanded }} aria-expanded={expanded} onPress={() => setExpanded(value => !value)} style={s.switch}><Text style={s.link}>{expanded ? 'Mostra meno' : 'Mostra dettaglio'}</Text></Pressable>}
       <OfficialLink url={line.url} label={`Fonte ${line.name}`} />

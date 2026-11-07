@@ -14,7 +14,7 @@ export function LineAlerts({ routeId }: { routeId: string }) {
   const [expanded, setExpanded] = useState(false);
   const data = state.data;
   const message = sourceMessage(data, Boolean(state.error));
-  if (!data?.items.length) return message ? <Text style={s.note}>{message}</Text> : null;
+  if (!data?.items.length) return null;
   const first = data.items[0];
   const date = publicationDate(first.updatedAt || first.publishedAt);
   return <GlassSurface style={s.card}>

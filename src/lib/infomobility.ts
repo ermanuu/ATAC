@@ -10,9 +10,7 @@ export function publicationDate(value: number | null) {
 }
 
 export function sourceMessage(data: SourceState | null, requestFailed = false) {
-  if (requestFailed) return data ? 'Impossibile aggiornare. Sono mostrate le ultime informazioni salvate.' : 'Impossibile aggiornare le informazioni. Riprova.';
-  if (!data) return '';
-  if (data.stale) return 'Ultime informazioni salvate: la fonte non è al momento verificabile.';
+  if (!data || data.stale || requestFailed) return '';
   if (data.refreshing && !data.timestamp) return 'Verifica della fonte in corso…';
   if (data.partial) return 'Alcune fonti non sono disponibili. Le informazioni potrebbero essere incomplete.';
   if (!data.available) return 'Fonte temporaneamente non disponibile. Riprova tra poco.';
