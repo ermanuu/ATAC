@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
+import json
 import sqlite3
 import tempfile
 import threading
@@ -31,6 +32,13 @@ def article(line='303', article_id=1, title=None):
             'content': {'rendered': f'<p>Deviata la linea {line}.<br>Leggi le informazioni.</p>'},
             'excerpt': {'rendered': ''}, 'date_gmt': '2026-11-06T20:56:40', 'modified_gmt': '2026-11-06T20:56:52',
             'link': 'https://romamobilita.it/infomobilita/avviso/'}
+
+
+def metro_line(code='A', status=1, **extra):
+    # Core fields were confirmed by the user's browser response on the VM.
+    # Route details follow the widget's supplied HTML, not a full live capture.
+    return {'Code': f'METRO{code}', 'Name': f'METRO {code}', 'Type': 1,
+            'IsOn': True, 'Status': status, 'Routes': [], **extra}
 
 
 class ParserTests(unittest.TestCase):
@@ -80,47 +88,126 @@ class ParserTests(unittest.TestCase):
 
 
 class MetroTests(unittest.TestCase):
-    def metro(self, items, **changes):
-        data = snapshot(info.rss_entries(feed(items, build=changes.pop('build', NOW))), **changes)
-        with patch.dict(info._sources, {'atac': Mock(read=Mock(return_value=data))}), patch.object(info.time, 'time', return_value=NOW):
-            return info.metro()
+    def metro(self, rows, **changes):
+        source = Mock(read=Mock(return_value=snapshot(info.parse_metro_lines(rows), **changes)))
+        rss = Mock()
+        with patch.dict(info._sources, {'atac-metro': source, 'atac': rss}):
+            result = info.metro(refresh=True)
+        source.read.assert_called_once_with(True)
+        rss.read.assert_not_called()
+        return result
 
-    def test_a_b_b1_c_are_explicit_and_b_b1_shared_messages_apply_to_both(self):
-        result = self.metro([('Metro A', 'Servizio regolare'), ('Metro B/B1', 'Rallentamenti per guasto tecnico'), ('Metro C', 'Servizio interrotto tra due stazioni')])
+    def test_each_line_uses_its_own_home_status_in_fixed_order(self):
+        result = self.metro([metro_line('C', 6), metro_line('B1', 4), metro_line('A'), metro_line('B', 2)])
         self.assertEqual([row['code'] for row in result['lines']], ['A', 'B', 'B1', 'C'])
-        self.assertEqual([row['status'] for row in result['lines']], ['regular', 'delays', 'delays', 'suspended'])
+        self.assertEqual([row['status'] for row in result['lines']], ['regular', 'delays', 'suspended', 'modified'])
+        self.assertEqual([row['label'] for row in result['lines']], ['Regolare', 'Rallentata', 'Non attiva', 'Parzialmente non attiva'])
+        self.assertTrue(result['available']); self.assertFalse(result['partial'])
+        self.assertEqual(result['sourceUrl'], 'https://www.atac.roma.it/')
+        self.assertTrue(all(row['url'] == result['sourceUrl'] and row['publishedAt'] is None for row in result['lines']))
+        self.assertIsNone(result['sourceTimestamp'])
 
-    def test_shared_b_and_b1_spelling_is_supported(self):
-        result = self.metro([('Metro B e B1', 'Servizio regolare')])
-        self.assertEqual([row['status'] for row in result['lines']], ['unknown', 'regular', 'regular', 'unknown'])
+    def test_home_status_ids_preserve_partial_interruptions_and_planned_work(self):
+        for value, status, label in [(1, 'regular', 'Regolare'), (2, 'delays', 'Rallentata'),
+                                     (3, 'modified', 'Servizio modificato'), (4, 'suspended', 'Non attiva'),
+                                     (5, 'suspended', 'Chiusa'), (6, 'modified', 'Parzialmente non attiva'),
+                                     (7, 'modified', 'Riprogrammata'), (8, 'modified', 'Lavori programmati')]:
+            with self.subTest(value=value):
+                row = self.metro([metro_line(status=value)])['lines'][0]
+                self.assertEqual((row['status'], row['label']), (status, label))
 
-    def test_multiple_lines_in_one_rss_item_do_not_share_the_wrong_status(self):
-        result = self.metro([('Situazione metro', '<p>Metro A: servizio regolare</p><p>Metro B: servizio sospeso</p><p>Metro B1: servizio regolare</p><p>Metro C: servizio modificato</p>')])
-        self.assertEqual([row['status'] for row in result['lines']], ['regular', 'suspended', 'regular', 'modified'])
+    def test_bus_tram_and_other_rail_records_cannot_set_a_metro_status(self):
+        result = self.metro([None, {}, metro_line('B'), metro_line('A', Type=2),
+                             metro_line('C', Type=3), metro_line(Code='CENTOCELLE'), metro_line(Code='nMA')])
+        self.assertEqual([row['status'] for row in result['lines']], ['unknown', 'regular', 'unknown', 'unknown'])
+        self.assertTrue(result['partial'])
 
-    def test_missing_lines_empty_feeds_and_unrecognized_status_are_unknown(self):
-        for items in [[], [('Metro A', 'Informazioni da verificare')], [('Linea nMA', 'Servizio regolare')]]:
-            self.assertTrue(all(row['status'] == 'unknown' for row in self.metro(items)['lines']))
+    def test_missing_inactive_and_unknown_lines_are_never_assumed_regular(self):
+        for changes in [{'IsOn': False}, {'IsOn': None}, {'IsOn': 'true'}, {'Status': 99},
+                        {'Status': None}, {'Status': True}, {'Status': 1.0}]:
+            with self.subTest(changes=changes):
+                result = self.metro([metro_line(**changes)])
+                self.assertTrue(all(row['status'] == 'unknown' for row in result['lines']))
+                self.assertTrue(result['partial'])
+
+    def test_conflicting_duplicate_lines_do_not_verify_regular_service(self):
+        for rows in [[metro_line(), metro_line(status=4)], [metro_line(status=4), metro_line(), metro_line()]]:
+            self.assertEqual(self.metro(rows)['lines'][0]['status'], 'unknown')
+
+    def test_only_active_route_details_are_shown_as_plain_text(self):
+        routes = [{'Name': '<b>Anagnina &amp; Battistini</b>', 'StatusName': 'Regolare',
+                   'Description': '-', 'Schedule': {'IsOn': True}},
+                  {'Name': 'Direzione opposta', 'StatusName': 'Servizio modificato',
+                   'Description': '<p>Stazione chiusa</p><script>bad()</script>', 'Schedule': {'IsOn': True}},
+                  {'Name': 'Percorso non attivo', 'StatusName': 'Non attiva', 'Schedule': {'IsOn': False}},
+                  None, {'Schedule': None}]
+        row = self.metro([metro_line(Routes=routes)])['lines'][0]
+        self.assertEqual(row['detail'], 'Anagnina & Battistini: Regolare\n\nDirezione opposta: Servizio modificato\nStazione chiusa')
+
+    def test_bad_top_level_and_empty_or_unrelated_data_are_source_errors(self):
+        for rows in [None, {}, {'ErrorId': 'upstream-error'}, [], [None, {}], [metro_line(Code='CENTOCELLE')]]:
+            with self.subTest(rows=rows), self.assertRaises(ValueError): info.parse_metro_lines(rows)
+
+    def test_public_home_request_is_a_bounded_json_post_in_italian(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = json.dumps([metro_line()]).encode()
+        with patch.object(info, 'urlopen', return_value=response) as fetch:
+            result = info.fetch_metro()
+        request = fetch.call_args.args[0]
+        self.assertEqual(request.full_url, 'https://www.atac.roma.it/Service/WebService.asmx/GetPrimaryLinesData')
+        self.assertEqual(request.get_method(), 'POST')
+        self.assertEqual(request.get_header('Content-type'), 'application/json')
+        self.assertEqual(json.loads(request.data), {'languageName': 'it'})
+        self.assertEqual(fetch.call_args.kwargs['timeout'], 8)
+        response.read.assert_called_once_with(4 * 1024 * 1024 + 1)
+        self.assertEqual(result[0]['status'], 'regular')
+
+    def test_failed_verification_removes_current_status_without_mutating_cache(self):
+        result = self.metro([metro_line()], available=False, stale=True)
+        self.assertFalse(result['available']); self.assertTrue(result['stale'])
+        self.assertTrue(all(row['status'] == 'unknown' for row in result['lines']))
+
+    def test_captcha_or_server_errors_do_not_turn_a_failed_source_into_live_status(self):
+        for body in [b'<html><title>Radware Captcha Page</title></html>', b'{"ErrorId":"failed"}', b'[]']:
+            with self.subTest(body=body), patch.object(info, 'download', return_value=body):
+                source = info.OfficialSource(info.fetch_metro)
+                with patch.dict(info._sources, {'atac-metro': source}): result = info.metro()
+                self.assertFalse(result['available']); self.assertTrue(result['error'])
+                self.assertIsNone(result['timestamp'])
+                self.assertTrue(all(row['status'] == 'unknown' for row in result['lines']))
+
+    def test_failed_refresh_retains_details_and_original_time_but_not_green_status(self):
+        route = {'Name': 'Direzione Battistini', 'StatusName': 'Regolare', 'Schedule': {'IsOn': True}}
+        with patch.object(info, 'download', return_value=json.dumps([metro_line(Routes=[route])]).encode()) as fetch:
+            source = info.OfficialSource(info.fetch_metro)
+            with patch.dict(info._sources, {'atac-metro': source}):
+                first = info.metro()
+                source.attempt -= 3
+                fetch.return_value = b'<html>CAPTCHA</html>'
+                failed = info.metro(refresh=True)
+            self.assertEqual(failed['timestamp'], first['timestamp'])
+            self.assertEqual(failed['lines'][0]['detail'], first['lines'][0]['detail'])
+            self.assertFalse(failed['available']); self.assertTrue(failed['stale'])
+            self.assertEqual(failed['lines'][0]['status'], 'unknown')
+            self.assertEqual(source.value[0]['status'], 'regular')
+
+
+class BulletinStatusTests(unittest.TestCase):
 
     def test_station_closure_does_not_claim_the_whole_line_is_suspended(self):
         for text in ['Servizio regolare. Stazione Spagna chiusa per lavori', 'Chiusa la stazione Spagna. Servizio regolare sulla linea']:
-            result = self.metro([('Metro A', text)])
-            self.assertEqual(result['lines'][0]['status'], 'modified')
+            self.assertEqual(info.metro_status(text)[0], 'modified')
 
     def test_explicitly_irregular_service_is_never_green(self):
         for text in ['Servizio non regolare', 'Circolazione irregolare', 'Servizio perturbato']:
-            self.assertEqual(self.metro([('Metro A', text)])['lines'][0]['status'], 'modified')
-
-    def test_failed_verification_and_future_feed_dates_never_show_green(self):
-        for changes in [{'available': False, 'stale': True}, {'build': NOW + 61}]:
-            result = self.metro([('Metro A', 'Servizio regolare')], **changes)
-            self.assertFalse(result['available'])
-            self.assertTrue(all(row['status'] == 'unknown' for row in result['lines']))
+            self.assertEqual(info.metro_status(text)[0], 'modified')
 
     def test_a_verified_service_bulletin_persists_until_the_publisher_changes_it(self):
-        result = self.metro([('Metro A', 'Servizio regolare')], build=NOW - 86400)
-        self.assertTrue(result['available'])
-        self.assertEqual(result['lines'][0]['status'], 'regular')
+        with patch.object(info.time, 'time', return_value=NOW):
+            self.assertTrue(info.service_feed_fresh(snapshot(info.rss_entries(feed([], build=NOW - 86400)))))
+            self.assertFalse(info.service_feed_fresh(snapshot(info.rss_entries(feed([], build=NOW + 61)))))
 
 
 class SourceTests(unittest.TestCase):

@@ -16,7 +16,9 @@ export function Metro() {
   const state = useData<MetroData>('metro', 30000, true);
   const data = state.data;
   const live = Boolean(data?.available && !state.error && data.lines.some(line => line.status !== 'unknown'));
-  const message = sourceMessage(data, Boolean(state.error));
+  const message = data?.available && data.partial && !state.error
+    ? 'Lo stato di alcune linee non è verificabile.'
+    : sourceMessage(data, Boolean(state.error));
   return <View style={s.page}>
     <View style={s.header}><Text accessibilityRole="header" style={s.title}>Metro</Text><Pressable accessibilityRole="button" accessibilityLabel="Apri News" onPress={() => router.replace('/news')} style={s.switch}><Text style={s.link}>News ›</Text></Pressable></View>
     <Text style={s.subtitle}>Lo stato delle metropolitane di Roma.</Text>
@@ -34,7 +36,6 @@ export function Metro() {
 function MetroCard({ line, verified }: { line: MetroLine; verified: boolean }) {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [expanded, setExpanded] = useState(false);
   const status = verified ? line.status : 'unknown';
   const color = status === 'regular' ? colors.live : status === 'unknown' ? colors.muted : colors.accent;
   const badgeColor = line.code === 'A' ? '#e98300' : line.code === 'C' ? '#008349' : '#006cb5';
@@ -44,8 +45,7 @@ function MetroCard({ line, verified }: { line: MetroLine; verified: boolean }) {
       <View style={s.flex}><Text accessibilityRole="header" style={s.metroName}>{line.name}</Text><View style={s.statusRow}><View accessible={false} style={[s.dot, { backgroundColor: color }]} /><Text style={[s.status, { color }]}>{verified ? line.label : 'Stato non verificabile'}</Text></View></View>
     </View>
     {verified && !!line.detail && <>
-      <Text numberOfLines={expanded ? undefined : 3} style={s.description}>{line.detail}</Text>
-      {line.detail.length > 180 && <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? 'Nascondi' : 'Mostra'} dettaglio ${line.name}`} accessibilityState={{ expanded }} aria-expanded={expanded} onPress={() => setExpanded(value => !value)} style={s.switch}><Text style={s.link}>{expanded ? 'Mostra meno' : 'Mostra dettaglio'}</Text></Pressable>}
+      <Text style={s.description}>{line.detail}</Text>
       <OfficialLink url={line.url} label={`Fonte ${line.name}`} />
     </>}
   </GlassSurface>;

@@ -6,6 +6,7 @@ from html import unescape
 from html.parser import HTMLParser
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -14,8 +15,11 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from . import transit as t
+from .metro_cache import read_snapshot, UNAVAILABLE as METRO_UNAVAILABLE
 
 RSM = 'https://romamobilita.it'
+ATAC_HOME = 'https://www.atac.roma.it/'
+ATAC_METRO = ATAC_HOME + 'Service/WebService.asmx/GetPrimaryLinesData'
 ATAC_FEED = 'https://www.atac.roma.it/feeds/stato-del-servizio-in-tempo-reale'
 ATAC_STATUS = 'https://www.atac.roma.it/stato-del-servizio'
 SOURCES = {'rsm-info': ('infomobilita', 'Infomobilità'), 'rsm-news': ('primo-piano', 'News')}
@@ -118,8 +122,13 @@ def parse_articles(rows, section):
     return articles
 
 
-def download(url):
-    request = Request(url, headers={'User-Agent': 'ROMABUS/1.0 (independent transit app)', 'Accept': 'application/json, application/rss+xml, text/xml', 'Cache-Control': 'no-cache'})
+def download(url, payload=None):
+    headers = {'User-Agent': 'ROMABUS/1.0 (independent transit app)', 'Accept': 'application/json, application/rss+xml, text/xml', 'Cache-Control': 'no-cache'}
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers['Content-Type'] = 'application/json'
+    request = Request(url, data=data, headers=headers)
     with urlopen(request, timeout=8) as response:
         body = response.read(4 * 1024 * 1024 + 1)
     if len(body) > 4 * 1024 * 1024: raise ValueError('Risposta della fonte troppo grande')
@@ -152,6 +161,57 @@ def rss_entries(body):
                         'url': link, 'source': 'ATAC', 'section': 'Stato del servizio', 'category': category(title),
                         'publishedAt': published, 'updatedAt': published, 'lines': line_mentions(title + '\n' + text), 'live': True})
     return {'entries': entries, 'sourceTimestamp': timestamp(channel.findtext('lastBuildDate')) or timestamp(channel.findtext('pubDate'))}
+
+
+# IDs and labels from the home page's StatoServizioWidget routeStatuses.
+# Partial interruptions must not imply that the whole line is suspended.
+_HOME_STATUSES = {
+    '1': ('regular', 'Regolare'), '2': ('delays', 'Rallentata'),
+    '3': ('modified', 'Servizio modificato'), '6': ('modified', 'Parzialmente non attiva'),
+    '4': ('suspended', 'Non attiva'), '7': ('modified', 'Riprogrammata'),
+    '8': ('modified', 'Lavori programmati'), '5': ('suspended', 'Chiusa'),
+}
+
+
+def empty_metro_line(code):
+    return {'code': code, 'name': f'Metro {code}', 'status': 'unknown', 'label': 'Stato non verificabile',
+            'detail': '', 'url': ATAC_HOME, 'publishedAt': None}
+
+
+def parse_metro_lines(rows):
+    """Read the same line status fields and active directions as ATAC's home widget."""
+    if not isinstance(rows, list): raise ValueError('Formato stato Metro non riconosciuto')
+    codes = {f'METRO{code}': code for code in METRO_LINES}
+    found = {}
+    for row in rows:
+        if not isinstance(row, dict) or str(row.get('Type')) != '1': continue
+        code = codes.get(str(row.get('Code', '')).strip().upper())
+        if not code: continue
+        line = empty_metro_line(code)
+        if code in found:
+            # Conflicting/duplicate records cannot verify a line as regular.
+            found[code] = line
+            continue
+        if row.get('IsOn') is True:
+            line['status'], line['label'] = _HOME_STATUSES.get(str(row.get('Status')), ('unknown', 'Stato non verificabile'))
+        details = []
+        for route in row.get('Routes', []) if isinstance(row.get('Routes'), list) else []:
+            if not isinstance(route, dict) or not isinstance(route.get('Schedule'), dict) or route['Schedule'].get('IsOn') is not True: continue
+            name, status = plain_text(route.get('Name')), plain_text(route.get('StatusName'))
+            description = plain_text(route.get('Description'))
+            detail = ': '.join(value for value in (name, status) if value)
+            if description and description != '-': detail += ('\n' if detail else '') + description
+            if detail: details.append(detail)
+        line['detail'] = '\n\n'.join(details)[:30000]
+        found[code] = line
+    if not found: raise ValueError('Stato Metro assente dalla fonte ATAC')
+    return [found.get(code, empty_metro_line(code)) for code in METRO_LINES]
+
+
+def fetch_metro():
+    # The saved home HTML identifies this public JSON POST. Never use that
+    # saved snapshot as current service status or infer it from RSS news.
+    return parse_metro_lines(json.loads(download(ATAC_METRO, {'languageName': 'it'})))
 
 
 class OfficialSource:
@@ -195,6 +255,7 @@ class OfficialSource:
 
 _sources = {kind: OfficialSource(lambda kind=kind: fetch_articles(kind)) for kind in SOURCES}
 _sources['atac'] = OfficialSource(lambda: rss_entries(download(ATAC_FEED)))
+_sources['atac-metro'] = OfficialSource(fetch_metro)
 
 
 def news(refresh=False):
@@ -205,9 +266,6 @@ def news(refresh=False):
             'stale': any(value['stale'] for value in values), 'refreshing': any(value['refreshing'] for value in values),
             'timestamp': min((value['timestamp'] for value in values if value['timestamp']), default=None),
             'error': next((value['error'] for value in values if value['error']), '')}
-
-
-_METRO = re.compile(r'\b(?:metro(?:politana)?|linea)\s*[-:]?\s*(B1|B\s*(?:/|e)\s*B?1|A|B|C)(?![\w])', re.I)
 
 
 def metro_status(text):
@@ -229,26 +287,23 @@ def service_feed_fresh(source):
 
 
 def metro(refresh=False):
-    source = _sources['atac'].read(refresh)
-    data = source['data'] or {'entries': [], 'sourceTimestamp': None}
-    build_time = data['sourceTimestamp']
-    fresh = service_feed_fresh(source)
-    found = {}
-    for item in data['entries']:
-        text = item['title'] + '\n' + item['text']
-        matches = list(_METRO.finditer(text))
-        for index, match in enumerate(matches):
-            segment = text[match.end(): matches[index + 1].start() if index + 1 < len(matches) else len(text)].strip(' :-\n')
-            key = match[1].upper().replace(' ', '')
-            status, label = metro_status(segment)
-            for code in ('B', 'B1') if '/' in key or 'E' in key else (key,):
-                if code in found and status == 'unknown': continue
-                found[code] = {'status': status if fresh else 'unknown', 'label': label if fresh else 'Stato non aggiornato',
-                               'detail': segment, 'url': item['url'], 'publishedAt': item['publishedAt']}
-    lines = [{'code': code, 'name': f'Metro {code}', 'status': 'unknown', 'label': 'Stato non verificabile',
-              'detail': '', 'url': ATAC_STATUS, 'publishedAt': None, **found.get(code, {})} for code in METRO_LINES]
-    return {k: v for k, v in source.items() if k != 'data'} | {'available': fresh, 'stale': source['stale'] or bool(build_time and not fresh), 'sourceTimestamp': build_time,
-            'lines': lines, 'source': 'ATAC', 'sourceUrl': ATAC_STATUS}
+    snapshot_path = os.environ.get('ATAC_METRO_SNAPSHOT', '').strip()
+    if snapshot_path:
+        # The browser collector refreshes this file independently of API readers.
+        source = read_snapshot(snapshot_path)
+        if source['data'] is not None:
+            try:
+                source['data'] = parse_metro_lines(source['data'])
+            except ValueError:
+                source.update(data=None, timestamp=None, available=False, stale=False, error=METRO_UNAVAILABLE)
+    else:
+        source = _sources['atac-metro'].read(refresh)
+    lines = source['data'] or [empty_metro_line(code) for code in METRO_LINES]
+    if not source['available']:
+        lines = [line | {'status': 'unknown', 'label': 'Stato non verificabile'} for line in lines]
+    return {k: v for k, v in source.items() if k != 'data'} | {
+        'partial': source['available'] and any(line['status'] == 'unknown' for line in lines),
+        'sourceTimestamp': None, 'lines': lines, 'source': 'ATAC', 'sourceUrl': ATAC_HOME}
 
 
 def line_alerts(route_id, refresh=False):

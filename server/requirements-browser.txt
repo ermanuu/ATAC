@@ -1,0 +1,2 @@
+# Optional: only on the VM collecting Metro through a verified Firefox profile.
+playwright==1.64.1

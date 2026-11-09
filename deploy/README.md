@@ -35,9 +35,225 @@ Per i successivi aggiornamenti del codice basta il consueto comando:
 sudo aggiorna-romabus
 ```
 
-Metro e segnalazioni consultano il feed RSS pubblico `https://www.atac.roma.it/feeds/stato-del-servizio-in-tempo-reale`; News consulta `https://romamobilita.it/wp-json/wp/v2/infomobilita` e `https://romamobilita.it/wp-json/wp/v2/primo-piano`. La VM deve poter raggiungere in HTTPS `www.atac.roma.it` e `romamobilita.it`. Non servono token o nuove dipendenze. Le API `/api/metro` e `/api/news` permettono di verificare le fonti anche senza un database GTFS importato. Una fonte irraggiungibile è segnalata nelle pagine interessate e non blocca posizioni, partenze e arrivi dei bus.
+Se sulla VM sono stati copiati a mano i file della bozza Metro, conservarli
+una sola volta prima del primo aggiornamento da GitHub. Questo evita che
+`git pull` si interrompa per modifiche locali o file ancora non tracciati:
+
+```sh
+sudo git -C /opt/romabus stash push --include-untracked -m 'Backup bozza Metro manuale' -- \
+  server/infomobility.py server/metro_cache.py server/requirements-browser.txt \
+  'scripts/*atac*' 'scripts/*metro*' 'deploy/systemd/romabus-metro*' \
+  src/components/Infomobility.tsx
+sudo aggiorna-romabus
+```
+
+La copia resta nello stash locale. Il codice verificato viene fornito dal
+repository aggiornato; non riapplicare lo stash dopo l'aggiornamento.
+Il profilo Firefox, i cookie e i dati in `server/data/` restano nei loro
+percorsi. Il lettore Metro già attivo continua a funzionare durante
+l'aggiornamento del sito. Le esecuzioni successive richiedono soltanto
+`sudo aggiorna-romabus`.
+
+Metro usa il servizio JSON della home ATAC: `POST https://www.atac.roma.it/Service/WebService.asmx/GetPrimaryLinesData`, con corpo `{"languageName":"it"}`. Le segnalazioni consultano il feed RSS pubblico `https://www.atac.roma.it/feeds/stato-del-servizio-in-tempo-reale`; News consulta `https://romamobilita.it/wp-json/wp/v2/infomobilita` e `https://romamobilita.it/wp-json/wp/v2/primo-piano`. La VM deve poter raggiungere in HTTPS `www.atac.roma.it` e `romamobilita.it`. Non servono token. Il lettore browser opzionale aggiunge Playwright e il suo Firefox. Le API `/api/metro` e `/api/news` permettono di verificare le fonti anche senza un database GTFS importato. Una fonte irraggiungibile è segnalata nelle pagine interessate e non blocca posizioni, partenze e arrivi dei bus.
 
 Lo script installato aggiorna anche le unità systemd prima di riavviare il sito.
+
+## Verificare l'accesso ATAC dalla VM
+
+Eseguire nel terminale SSH della VM. Questa prova non richiede aggiornamenti del
+codice né riavvii e usa gli stessi header e il corpo JSON del backend:
+
+```sh
+curl -sS --max-time 20 \
+  -H 'User-Agent: ROMABUS/1.0 (independent transit app)' \
+  -H 'Accept: application/json, application/rss+xml, text/xml' \
+  -H 'Content-Type: application/json' \
+  -H 'Cache-Control: no-cache' \
+  --data '{"languageName":"it"}' \
+  -o /tmp/romabus-atac-check.json \
+  -w 'HTTP %{http_code}\nTipo %{content_type}\n' \
+  'https://www.atac.roma.it/Service/WebService.asmx/GetPrimaryLinesData'
+```
+
+`HTTP 200` con tipo `application/json` indica una risposta JSON da verificare nel
+file `/tmp/romabus-atac-check.json`. Un redirect `302`, un errore `403` o una
+risposta HTML richiedono di controllare il blocco del sito: dal cloud ATAC
+reindirizza a un CAPTCHA e non restituisce i dati. Il risultato dalla VM può
+essere diverso perché usa un altro indirizzo IP. Il comando non segue i
+redirect e non tenta di risolvere il CAPTCHA automaticamente.
+
+### Prova del widget con un browser senza interfaccia grafica
+
+Sulla VM il browser Firefox interattivo ha restituito HTTP 200 e i quattro
+record Metro attesi; le richieste dirette continuano a ricevere il redirect
+al CAPTCHA. Per verificare il funzionamento senza una sessione SSH grafica,
+`scripts/check-atac-browser.py` osserva la richiesta POST effettuata dal widget
+della home in Firefox Playwright. La prova non esporta cookie, non risolve
+CAPTCHA e non modifica il backend in esecuzione.
+
+Se il file non è ancora nel checkout della VM, copiarlo separatamente, per
+esempio in `/root/check-atac-browser.py` con il pannello SFTP di MobaXterm.
+Preparare un ambiente isolato dall'applicazione:
+
+```sh
+python3 -m venv /root/romabus-atac-test/venv
+/root/romabus-atac-test/venv/bin/python -m pip install playwright==1.64.1
+/root/romabus-atac-test/venv/bin/python -m playwright install --with-deps firefox
+/root/romabus-atac-test/venv/bin/python /root/check-atac-browser.py --profile /root/romabus-atac-test/profile
+```
+
+L'installer scarica Firefox Playwright e installa le librerie di sistema
+necessarie; il pacchetto Firefox Snap già presente non viene usato. Il profilo
+è dedicato alla prova e va conservato sulla VM. L'output mostra codice HTTP,
+tipo della risposta e i campi pubblici delle linee Metro. Un timeout o una
+risposta HTML/redirect indica che la lettura automatica non è verificata.
+`--headed` permette una prova visibile nella sessione X11, con lo stesso
+profilo dedicato. Sulla VM anche il browser Playwright visibile ha mostrato
+il CAPTCHA. Per lasciare il browser aperto durante la verifica manuale,
+copiare la versione aggiornata dello script sulla VM e usare:
+
+```sh
+/root/romabus-atac-test/venv/bin/python /root/check-atac-browser.py --profile /root/romabus-atac-test/profile --headed --manual
+```
+
+Completare personalmente il CAPTCHA e premere Submit nel browser. Quando
+compare la home ATAC, premere Invio nel terminale: la prova apre una nuova
+scheda nella stessa sessione e legge una nuova risposta del widget. Se la
+verifica non riporta alla home, non viene riportato un esito positivo.
+Un successo dopo questa procedura conferma soltanto la sessione verificata:
+per controllare se rimane utilizzabile senza finestra, ripetere il comando
+originale senza `--headed --manual`, con lo stesso profilo. Non avviare le
+due prove contemporaneamente sullo stesso profilo.
+
+Un esito positivo soltanto con `--headed` non conferma il funzionamento senza
+interfaccia grafica. L'utente ha successivamente confermato HTTP 200 anche
+senza finestra con il profilo verificato. I test opzionali del progetto usano
+Chromium locale contro un server di prova; questa conferma dal vivo riguarda
+la VM e la sessione provata, non una durata garantita dell'autorizzazione.
+
+## Lettore continuo Metro sulla VM
+
+Questa installazione è opzionale e presuppone che il codice aggiornato sia
+disponibile in `/opt/romabus`. La copia del solo diagnostico in `/root` non
+aggiorna il backend. I comandi seguenti sono una procedura di installazione:
+non sono stati eseguiti dal cloud e non pubblicano codice su GitHub.
+
+Il servizio `romabus-metro-browser.service` gira come utente `romabus`, con un
+profilo privato in `/var/lib/romabus-metro/profile`. Mantiene aperto un solo
+Firefox senza finestra e osserva i POST generati dal widget ogni due minuti,
+senza ricaricare la pagina a ogni raccolta. Il browser non viene avviato
+dalle richieste dei visitatori. Il backend legge il file pubblico
+`/opt/romabus/server/data/metro-browser.json` quando è configurato
+`ATAC_METRO_SNAPSHOT`. I cookie restano nel profilo privato sulla VM.
+
+### Preparazione senza attivazione
+
+Chiudere le prove che usano il profilo sorgente, poi eseguire:
+
+```sh
+cd /opt/romabus
+sudo bash scripts/install-metro-browser.sh --profile-source /root/romabus-atac-test/profile
+```
+
+Lo script installa le dipendenze da `server/requirements-browser.txt`, scarica
+Firefox in `/var/lib/romabus-metro/browsers`, copia il profilo verificato solo
+se manca quello di servizio e ne assegna la proprietà a `romabus`. Conserva il
+profilo sorgente. Prepara servizio e drop-in del backend con copie di backup
+dei file modificati, senza avviare il lettore né riavviare il sito.
+Per esaminare soltanto i file di configurazione, senza pacchetti né profili:
+
+```sh
+DESTDIR=/tmp/romabus-metro-stage bash scripts/install-metro-browser.sh
+```
+
+### Verifica e attivazione
+
+Se era stato installato il precedente timer che riapriva Firefox a ogni
+raccolta, disabilitarlo prima di avviare il nuovo lettore:
+
+```sh
+sudo systemctl disable --now romabus-metro-browser.timer
+sudo systemctl stop romabus-metro-browser.service
+```
+
+La sessione copiata va verificata sotto l'utente del servizio prima
+dell'attivazione sul sito:
+
+```sh
+sudo systemctl start romabus-metro-browser.service
+sudo journalctl -u romabus-metro-browser.service -n 20 --no-pager
+sudo -u romabus .venv/bin/python -c 'from server.metro_cache import read_snapshot; s=read_snapshot("/opt/romabus/server/data/metro-browser.json"); print({k:v for k,v in s.items() if k != "data"}); assert s["available"]'
+```
+
+Il servizio usa `Type=notify`: `systemctl start` attende la prima risposta
+JSON valida e poi il processo resta `active (running)`. Il watchdog verifica
+che il lettore continui a elaborare eventi. Un errore temporaneo può provocare
+un riavvio dopo due minuti; l'uscita 3 indica una verifica manuale richiesta
+e impedisce riavvii automatici ripetuti al CAPTCHA.
+
+Prima di attivarlo sul sito, lasciare il servizio in prova per almeno 15 minuti
+e controllare che aumentino i messaggi `Metro: lettura verificata #...`, con
+uno snapshot ancora disponibile. La prova precedente si è interrotta dopo
+circa undici minuti: un solo successo non dimostra continuità.
+
+```sh
+sudo journalctl -u romabus-metro-browser.service -n 20 --no-pager
+sudo systemctl status romabus-metro-browser.service --no-pager
+```
+
+Una volta decisa l'attivazione della modifica, aggiornare la copia web e attivare:
+
+```sh
+sudo -u romabus npm run build:web
+sudo systemctl enable romabus-metro-browser.service
+sudo systemctl restart romabus
+curl -fsS http://127.0.0.1:8000/api/metro
+systemctl status romabus-metro-browser.service --no-pager
+```
+
+La risposta deve indicare `available: true` con i quattro stati e l'orario
+della verifica. Il client consulta questa risposta ogni 30 secondi. Anche
+`fresh=1` rilegge il file già disponibile: il nuovo download ATAC viene
+eseguito dal widget nel browser mantenuto aperto. Non dipende da MobaXterm
+o da una sessione SSH aperta.
+
+### Scadenza della sessione e nuova verifica manuale
+
+In caso di CAPTCHA, HTML, errore di rete o formato inatteso, la raccolta
+scrive `available: false` conservando data e dettagli dell'ultimo successo.
+Il backend mostra subito gli stati come non verificabili. Se il lettore si
+ferma o non riesce a scrivere il file, la copia scade comunque dopo cinque
+minuti dalla lettura originale, anche se viene riletta o copiata. Il browser
+non risolve automaticamente nuove verifiche. Dalla sessione MobaXterm con
+X11 attivo, fermare prima il lettore:
+
+```sh
+sudo systemctl stop romabus-metro-browser.service
+sudo install -o romabus -g romabus -m 600 "${XAUTHORITY:-$HOME/.Xauthority}" /var/lib/romabus-metro/Xauthority
+sudo runuser -u romabus -- env DISPLAY="$DISPLAY" XAUTHORITY=/var/lib/romabus-metro/Xauthority PLAYWRIGHT_BROWSERS_PATH=/var/lib/romabus-metro/browsers XDG_CACHE_HOME=/var/lib/romabus-metro/cache XDG_CONFIG_HOME=/var/lib/romabus-metro/config XDG_STATE_HOME=/var/lib/romabus-metro/state /opt/romabus/.venv/bin/python /opt/romabus/scripts/check-atac-browser.py --profile /var/lib/romabus-metro/profile --headed --manual
+```
+
+Completare personalmente il CAPTCHA, premere Submit e, quando compare la home,
+premere Invio nel terminale. Dopo un esito positivo, riprovare il servizio
+senza finestra:
+
+```sh
+sudo systemctl start romabus-metro-browser.service
+```
+
+### Disabilitare il lettore browser
+
+```sh
+sudo systemctl disable --now romabus-metro-browser.service
+sudo rm /etc/systemd/system/romabus.service.d/metro-browser.conf
+sudo systemctl daemon-reload
+sudo systemctl restart romabus
+```
+
+Questo rimuove la scelta dello snapshot e riattiva il metodo HTTP diretto,
+che sulla VM provata riceve un redirect al CAPTCHA. Se esisteva una precedente
+configurazione con quel nome, ripristinare la copia `.backup.*` al posto della
+rimozione. Profili e cookie restano sulla VM e non vengono inclusi nel codice.
 
 ## Verifica ed esecuzione manuale
 
