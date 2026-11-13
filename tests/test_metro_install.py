@@ -15,6 +15,22 @@ SCRIPT = ROOT / 'scripts/install-metro-browser.sh'
 class MetroInstallTests(unittest.TestCase):
     def test_shell_syntax(self):
         subprocess.run(['bash', '-n', str(SCRIPT)], check=True)
+        subprocess.run(['bash', '-n', str(ROOT / 'scripts/verify-metro-browser.sh')], check=True)
+
+    def test_manual_verification_checks_x11_before_stopping_services(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            calls = root / 'systemctl-calls'
+            command = root / 'systemctl'
+            command.write_text('#!/bin/sh\nprintf called > "$ROMABUS_TEST_CALLS"\n')
+            command.chmod(0o755)
+            env = os.environ | {'DISPLAY': '', 'ROMABUS_TEST_CALLS': str(calls),
+                                'PATH': folder + os.pathsep + os.environ['PATH']}
+            result = subprocess.run(['bash', str(ROOT / 'scripts/verify-metro-browser.sh')],
+                                    env=env, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('DISPLAY assente', result.stderr)
+            self.assertFalse(calls.exists())
 
     def test_staging_is_idempotent_and_leaves_the_existing_web_service_intact(self):
         with tempfile.TemporaryDirectory() as folder:

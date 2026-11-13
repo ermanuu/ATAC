@@ -116,10 +116,15 @@ copiare la versione aggiornata dello script sulla VM e usare:
 /root/romabus-atac-test/venv/bin/python /root/check-atac-browser.py --profile /root/romabus-atac-test/profile --headed --manual
 ```
 
-Completare personalmente il CAPTCHA e premere Submit nel browser. Quando
-compare la home ATAC, premere Invio nel terminale: la prova apre una nuova
-scheda nella stessa sessione e legge una nuova risposta del widget. Se la
+Completare personalmente l'eventuale CAPTCHA e premere Submit nel browser.
+Quando compare la home ATAC, premere Invio nel terminale: la prova mantiene
+la stessa pagina e attende fino a tre minuti un nuovo aggiornamento automatico
+del widget, che normalmente si aggiorna ogni due minuti. Le risposte dei POST
+iniziati prima della conferma vengono ignorate, anche quando arrivano dopo.
+Non vengono aperte altre schede né ricaricata la pagina dopo Invio. Se la
 verifica non riporta alla home, non viene riportato un esito positivo.
+La sola presenza della home non conferma l'accesso al servizio JSON: un
+redirect o un errore del widget rende la prova non verificata.
 Un successo dopo questa procedura conferma soltanto la sessione verificata:
 per controllare se rimane utilizzabile senza finestra, ripetere il comando
 originale senza `--headed --manual`, con lo stesso profilo. Non avviare le
@@ -225,21 +230,21 @@ Il backend mostra subito gli stati come non verificabili. Se il lettore si
 ferma o non riesce a scrivere il file, la copia scade comunque dopo cinque
 minuti dalla lettura originale, anche se viene riletta o copiata. Il browser
 non risolve automaticamente nuove verifiche. Dalla sessione MobaXterm con
-X11 attivo, fermare prima il lettore:
+X11 attivo, eseguire il comando di ripristino:
 
 ```sh
-sudo systemctl stop romabus-metro-browser.service
-sudo install -o romabus -g romabus -m 600 "${XAUTHORITY:-$HOME/.Xauthority}" /var/lib/romabus-metro/Xauthority
-sudo runuser -u romabus -- env DISPLAY="$DISPLAY" XAUTHORITY=/var/lib/romabus-metro/Xauthority PLAYWRIGHT_BROWSERS_PATH=/var/lib/romabus-metro/browsers XDG_CACHE_HOME=/var/lib/romabus-metro/cache XDG_CONFIG_HOME=/var/lib/romabus-metro/config XDG_STATE_HOME=/var/lib/romabus-metro/state /opt/romabus/.venv/bin/python /opt/romabus/scripts/check-atac-browser.py --profile /var/lib/romabus-metro/profile --headed --manual
+sudo bash /opt/romabus/scripts/verify-metro-browser.sh
 ```
 
-Completare personalmente il CAPTCHA, premere Submit e, quando compare la home,
-premere Invio nel terminale. Dopo un esito positivo, riprovare il servizio
-senza finestra:
-
-```sh
-sudo systemctl start romabus-metro-browser.service
-```
+Il comando controlla X11 prima di fermare il lettore, prepara l'autorizzazione
+grafica per l'utente `romabus` e apre il profilo del servizio. Completare
+personalmente l'eventuale CAPTCHA, premere Submit e, quando compare la home,
+premere Invio nel terminale. Attendere il successivo aggiornamento del widget
+nella stessa pagina, fino a tre minuti. Solo dopo una lettura JSON valida il
+comando riavvia il lettore senza finestra e mostra la risposta dell'API Metro.
+Se la verifica del widget fallisce, il comando si ferma, conserva la data
+dell'ultimo successo e marca i dati come non verificabili. Il sito non viene
+riavviato da questo comando.
 
 ### Disabilitare il lettore browser
 

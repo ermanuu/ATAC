@@ -19,7 +19,7 @@ CODES = ('METROA', 'METROB', 'METROB1', 'METROC')
 
 
 def read_widget(browser_type, profile, *, headed=False, manual=False, include_rows=False, executable=None,
-                home=HOME, endpoint=ENDPOINT, timeout=45000):
+                home=HOME, endpoint=ENDPOINT, timeout=45000, manual_timeout=180000):
     """Observe the widget's POST; never submit/solve a security challenge."""
     from playwright.sync_api import TimeoutError as BrowserTimeout
 
@@ -29,7 +29,8 @@ def read_widget(browser_type, profile, *, headed=False, manual=False, include_ro
     if executable:
         options['executable_path'] = executable
     with browser_type.launch_persistent_context(str(profile), **options) as context:
-        page = context.new_page()
+        page = context.pages[0] if context.pages else context.new_page()
+        confirmed_after = None
         if manual:
             page.goto(home, wait_until='domcontentloaded', timeout=timeout)
             input('Completa manualmente il CAPTCHA e premi Submit nel browser. '
@@ -40,20 +41,26 @@ def read_widget(browser_type, profile, *, headed=False, manual=False, include_ro
             expected = urlparse(home)
             if (current.scheme, current.netloc) != (expected.scheme, expected.netloc):
                 raise ValueError('Il browser non è tornato alla home ATAC: verifica manuale non completata.')
-            # A fresh tab shares the verified browser session but cannot match
-            # a response queued before the user completed the verification.
-            page = context.new_page()
+            # Keep the page verified by the user. Its widget refreshes every
+            # two minutes; require a POST started after confirmation, including
+            # when an older response is still in flight or queued by input().
+            confirmed_after = time.time() * 1000
+            print('Attendo un nuovo aggiornamento automatico del widget nella stessa pagina '
+                  '(fino a 3 minuti).', flush=True)
         try:
             with page.expect_response(
-                lambda response: response.url == endpoint and response.request.method == 'POST',
-                timeout=timeout,
+                lambda response: response.url == endpoint and response.request.method == 'POST'
+                and (confirmed_after is None or response.request.timing['startTime'] >= confirmed_after),
+                timeout=manual_timeout if manual else timeout,
             ) as pending:
-                page.goto(home, wait_until='domcontentloaded', timeout=timeout)
+                if not manual:
+                    page.goto(home, wait_until='domcontentloaded', timeout=timeout)
             response = pending.value
         except BrowserTimeout:
             host = urlparse(page.url).hostname or 'pagina non caricata'
             raise ValueError(f'Nessuna risposta del widget entro il timeout. Dominio attuale: {host}. '
                              'Accesso automatico non verificato; può essere necessario un controllo manuale.') from None
+        fetched_at = time.time()
         content_type = response.headers.get('content-type', '')
         if response.status != 200 or 'application/json' not in content_type.lower():
             raise ValueError(f'Il widget non ha restituito JSON: HTTP {response.status}. '
@@ -70,7 +77,7 @@ def read_widget(browser_type, profile, *, headed=False, manual=False, include_ro
             raise ValueError('La risposta JSON non contiene le linee Metro attese.')
         result = {'http': response.status, 'type': content_type, 'lines': lines}
         if include_rows:
-            result.update(rows=metro, fetchedAt=time.time())
+            result.update(rows=metro, fetchedAt=fetched_at)
         return result
 
 

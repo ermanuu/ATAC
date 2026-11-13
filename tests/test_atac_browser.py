@@ -29,11 +29,21 @@ class BrowserProbeTests(unittest.TestCase):
         self.requests, self.load_widget = [], True
         self.session_cookies = []
         self.redirect = None
+        self.interval = False
+        self.reject_reopen = False
+        self.delay_first = 0
+        self.status_after_first = None
+        self.first_request = threading.Event()
         case = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 if self.path == '/': case.session_cookies.append(self.headers.get('Cookie', ''))
+                if self.path == '/' and case.reject_reopen and len(case.session_cookies) > 1:
+                    self.send_response(302)
+                    self.send_header('Location', f'http://localhost:{case.server.server_port}/challenge')
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html')
                 self.send_header('Set-Cookie', 'probe-session=local-fixture; Path=/; HttpOnly')
@@ -42,19 +52,26 @@ class BrowserProbeTests(unittest.TestCase):
                 if self.path == '/' and case.redirect:
                     html += f'<script>setTimeout(() => location.href = {json.dumps(case.redirect)}, 100);</script>'
                 if self.path == '/' and case.load_widget:
-                    html += '''<script>fetch('/Service/WebService.asmx/GetPrimaryLinesData', {
+                    html += '''<script>function refresh() {fetch('/Service/WebService.asmx/GetPrimaryLinesData', {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({languageName: 'it'})
-                    });</script>'''
+                    });} refresh();''' + ('setInterval(refresh, 350);' if case.interval else '') + '</script>'
                 self.wfile.write(html.encode())
 
             def do_POST(self):
                 case.requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                request_index = len(case.requests)
+                payload = json.loads(json.dumps(case.payload))
+                if request_index > 1 and case.status_after_first is not None:
+                    payload[1]['Status'] = case.status_after_first
+                case.first_request.set()
+                if request_index == 1 and case.delay_first:
+                    time.sleep(case.delay_first)
                 self.send_response(case.code)
                 self.send_header('Content-Type', case.content_type)
                 if case.code == 302: self.send_header('Location', '/challenge')
                 self.end_headers()
-                self.wfile.write(json.dumps(case.payload).encode())
+                self.wfile.write(json.dumps(payload).encode())
 
             def log_message(self, *args): pass
 
@@ -73,7 +90,8 @@ class BrowserProbeTests(unittest.TestCase):
         with sync_playwright() as playwright:
             return probe.read_widget(playwright.chromium, Path(self.folder.name) / 'profile',
                                      executable=shutil.which('chromium'), home=home,
-                                     endpoint=home + 'Service/WebService.asmx/GetPrimaryLinesData', timeout=1200, **options)
+                                     endpoint=home + 'Service/WebService.asmx/GetPrimaryLinesData',
+                                     timeout=1200, manual_timeout=1200, **options)
 
     def test_observes_actual_widget_post_without_replaying_it_or_exporting_state(self):
         self.payload += [{'Code': '75', 'Type': 2, 'IsOn': True, 'Status': 1}]
@@ -95,20 +113,45 @@ class BrowserProbeTests(unittest.TestCase):
         self.load_widget = False
         with self.assertRaisesRegex(ValueError, 'Nessuna risposta del widget'): self.read()
 
-    def test_manual_gate_precedes_fresh_read_in_the_same_browser_session(self):
-        self.load_widget = False
+    def test_manual_gate_waits_for_native_refresh_without_new_tabs_or_reloading(self):
+        self.interval, self.reject_reopen = True, True
+        self.status_after_first = 2
         def confirm(prompt):
             self.assertIn('Invio', prompt)
-            self.assertEqual(self.requests, [])
-            self.load_widget = True
+            self.assertTrue(self.first_request.wait(1))
             return ''
         with patch('builtins.input', side_effect=confirm) as entered:
             result = self.read(manual=True)
         entered.assert_called_once()
         self.assertEqual(result['http'], 200)
-        self.assertEqual(self.requests, [{'languageName': 'it'}])
-        self.assertEqual(self.session_cookies, ['', 'probe-session=local-fixture'])
+        self.assertGreaterEqual(len(self.requests), 2)
+        self.assertTrue(all(body == {'languageName': 'it'} for body in self.requests))
+        self.assertEqual(result['lines'][1]['Status'], 2)
+        self.assertEqual(self.session_cookies, [''])
         self.assertEqual(set(result), {'http', 'type', 'lines'})
+
+    def test_manual_gate_ignores_a_response_started_before_confirmation_but_delivered_later(self):
+        self.interval, self.delay_first, self.status_after_first = True, .2, 2
+        with patch('builtins.input', side_effect=lambda _: self.first_request.wait(1)):
+            result = self.read(manual=True)
+        self.assertEqual(result['lines'][1]['Status'], 2)
+        self.assertEqual(self.session_cookies, [''])
+
+    def test_manual_gate_does_not_reuse_an_old_success_when_the_widget_stops(self):
+        def confirm(_):
+            self.assertTrue(self.first_request.wait(1))
+            time.sleep(.15)
+            return ''
+        with patch('builtins.input', side_effect=confirm), self.assertRaisesRegex(ValueError, 'Nessuna risposta del widget'):
+            self.read(manual=True)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.session_cookies, [''])
+
+    def test_visible_home_does_not_verify_a_widget_redirected_to_a_challenge(self):
+        self.interval, self.code, self.content_type = True, 302, 'text/html'
+        with patch('builtins.input', return_value=''), self.assertRaisesRegex(ValueError, 'HTTP 302'):
+            self.read(manual=True)
+        self.assertEqual(self.session_cookies, [''])
 
     def test_manual_cancellation_does_not_attempt_to_read_or_report_live_data(self):
         self.load_widget = False
